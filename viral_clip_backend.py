@@ -4031,21 +4031,14 @@ class ViralClipGenerator:
 # Flask Application Setup
 app = Flask(__name__)
 
-# Configure CORS to allow frontend requests from all localhost ports and Render domain
+# Configure CORS to allow frontend requests from all origins
+# Using wildcard (*) to fix CORS issues with Render deployment
+# Note: This is less secure but necessary for cross-origin requests from localhost to Render
 CORS(app, 
-     origins=[
-         "http://localhost:3000",  # Default Vite port
-         "http://localhost:5173",  # Your current Vite port
-         "http://localhost:4173",  # Vite preview port
-         "http://127.0.0.1:3000",
-         "http://127.0.0.1:5173",
-         "http://127.0.0.1:4173",
-         "https://zuexisbacckend.onrender.com",  # Render backend domain
-         "https://*.onrender.com"  # Allow all Render subdomains
-     ],
+     origins="*",  # Allow all origins for now to fix CORS issues
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
      allow_headers=["Content-Type", "Authorization"],
-     supports_credentials=True,
+     supports_credentials=False,  # Disable credentials for wildcard origins
      max_age=3600  # Cache preflight response for 1 hour
 )
 
@@ -4116,9 +4109,17 @@ with app.app_context():
     setup()
 
 # API Routes
-@app.route('/api/health', methods=['GET'])
+@app.route('/api/health', methods=['GET', 'OPTIONS'])
 def health_check():
     """Health check endpoint"""
+    if request.method == 'OPTIONS':
+        # Preflight request - return with CORS headers
+        response = jsonify({'message': 'Health check preflight successful'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        return response
+    
     # Check OAuth configuration
     oauth_config = {
         'google_drive': {
@@ -4132,7 +4133,8 @@ def health_check():
         }
     }
     
-    return jsonify({
+    # Create response with explicit CORS headers
+    response = jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
         'generator_ready': generator is not None,
@@ -4146,6 +4148,13 @@ def health_check():
             }.items() if not value
         ]
     })
+    
+    # Add explicit CORS headers
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    
+    return response
 
 @app.route('/', methods=['GET'])
 def root():
@@ -5327,6 +5336,14 @@ def test_video_display():
 @app.route('/api/frontend/test-cors', methods=['GET', 'POST', 'OPTIONS'])
 def test_cors():
     """Test endpoint to verify CORS is working properly"""
+    if request.method == 'OPTIONS':
+        # Preflight request - return with CORS headers
+        response = jsonify({'message': 'CORS preflight successful'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        return response
+    
     # Get request info for debugging
     request_info = {
         'method': request.method,
@@ -5336,7 +5353,8 @@ def test_cors():
         'timestamp': datetime.now().isoformat()
     }
     
-    return jsonify({
+    # Create response with explicit CORS headers
+    response = jsonify({
         'success': True,
         'message': 'CORS test successful',
         'request_info': request_info,
@@ -5346,6 +5364,13 @@ def test_cors():
             'access_control_allow_headers': 'Content-Type, Authorization'
         }
     })
+    
+    # Add explicit CORS headers
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    
+    return response
 
 @app.route('/api/frontend/google-oauth', methods=['POST'])
 def google_oauth_exchange():
