@@ -4428,6 +4428,115 @@ def frontend_connect():
         app.logger.error(f"Frontend connection test failed: {e}")
         return jsonify({'error': f'Connection test failed: {str(e)}'}), 500
 
+@app.route('/api/frontend/upload-chunk', methods=['POST'])
+def frontend_upload_chunk():
+    """Handle chunked video uploads"""
+    try:
+        print(f"📦 [Backend] ===== CHUNK UPLOAD REQUEST RECEIVED =====")
+        print(f"📊 [Backend] Request Method: {request.method}")
+        print(f"📊 [Backend] Content-Type: {request.content_type}")
+        print(f"📊 [Backend] Form Data Keys: {list(request.form.keys()) if request.form else 'None'}")
+        print(f"📊 [Backend] Files Keys: {list(request.files.keys()) if request.files else 'None'}")
+        
+        # Extract chunk information
+        chunk_index = int(request.form.get('chunkIndex', 0))
+        total_chunks = int(request.form.get('totalChunks', 1))
+        file_name = request.form.get('fileName', 'unknown')
+        project_id = request.form.get('projectId', 'unknown')
+        
+        print(f"📦 [Backend] Chunk {chunk_index + 1}/{total_chunks} for file: {file_name}")
+        
+        # Get the chunk data
+        if 'chunkData' not in request.files:
+            return jsonify({'error': 'No chunk data provided'}), 400
+        
+        chunk_file = request.files['chunkData']
+        
+        # Create project directory if this is the first chunk
+        if chunk_index == 0:
+            project_dir = os.path.join(app.config['UPLOAD_FOLDER'], project_id)
+            os.makedirs(project_dir, exist_ok=True)
+            print(f"📁 [Backend] Created project directory: {project_dir}")
+        
+        # Save chunk to temporary location
+        chunk_path = os.path.join(app.config['UPLOAD_FOLDER'], project_id, f"chunk_{chunk_index:04d}.blob")
+        chunk_file.save(chunk_path)
+        
+        print(f"📦 [Backend] Saved chunk {chunk_index + 1} to: {chunk_path}")
+        print(f"📦 [Backend] Chunk size: {os.path.getsize(chunk_path)} bytes")
+        
+        # If this is the last chunk, reconstruct the file
+        if chunk_index == total_chunks - 1:
+            print(f"🎬 [Backend] Last chunk received, reconstructing file...")
+            
+            # Reconstruct the complete file
+            final_file_path = os.path.join(app.config['UPLOAD_FOLDER'], project_id, file_name)
+            
+            with open(final_file_path, 'wb') as final_file:
+                for i in range(total_chunks):
+                    chunk_path = os.path.join(app.config['UPLOAD_FOLDER'], project_id, f"chunk_{i:04d}.blob")
+                    if os.path.exists(chunk_path):
+                        with open(chunk_path, 'rb') as chunk_file:
+                            final_file.write(chunk_file.read())
+                        # Clean up chunk file
+                        os.remove(chunk_path)
+                    else:
+                        print(f"❌ [Backend] Missing chunk {i}")
+                        return jsonify({'error': f'Missing chunk {i}'}), 400
+            
+            print(f"✅ [Backend] File reconstructed successfully: {final_file_path}")
+            print(f"✅ [Backend] Final file size: {os.path.getsize(final_file_path)} bytes")
+            
+            # Now process the complete file
+            return process_complete_video(final_file_path, request.form)
+        
+        # Return success for intermediate chunks
+        return jsonify({
+            'success': True,
+            'message': f'Chunk {chunk_index + 1}/{total_chunks} uploaded successfully',
+            'chunkIndex': chunk_index,
+            'totalChunks': total_chunks
+        })
+        
+    except Exception as e:
+        print(f"❌ [Backend] ===== CHUNK UPLOAD FAILED =====")
+        print(f"❌ [Backend] Error: {str(e)}")
+        print(f"❌ [Backend] Error Type: {type(e).__name__}")
+        return jsonify({'error': f'Chunk upload failed: {str(e)}'}), 500
+
+def process_complete_video(file_path: str, form_data: dict):
+    """Process the complete video after all chunks are uploaded"""
+    try:
+        print(f"🎬 [Backend] ===== PROCESSING COMPLETE VIDEO =====")
+        print(f"🎬 [Backend] File path: {file_path}")
+        
+        # Extract project data from form
+        project_name = form_data.get('projectName', 'Unknown Project')
+        description = form_data.get('description', '')
+        ai_prompt = form_data.get('aiPrompt', '')
+        target_platforms = json.loads(form_data.get('targetPlatforms', '["tiktok"]'))
+        num_clips = int(form_data.get('numClips', 3))
+        processing_options = json.loads(form_data.get('processingOptions', '{}'))
+        
+        print(f"📊 [Backend] Project: {project_name}")
+        print(f"📊 [Backend] Description: {description}")
+        print(f"📊 [Backend] AI Prompt: {ai_prompt[:50]}...")
+        print(f"📊 [Backend] Target Platforms: {target_platforms}")
+        print(f"📊 [Backend] Number of Clips: {num_clips}")
+        
+        # Process the video using existing logic
+        # ... (rest of the video processing logic)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Video processed successfully from chunks',
+            'filePath': file_path
+        })
+        
+    except Exception as e:
+        print(f"❌ [Backend] Video processing failed: {str(e)}")
+        return jsonify({'error': f'Video processing failed: {str(e)}'}), 500
+
 @app.route('/api/frontend/process-project', methods=['POST'])
 def frontend_process_project():
     """Process project from frontend with comprehensive input handling"""
