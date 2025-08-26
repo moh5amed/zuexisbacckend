@@ -7,7 +7,7 @@ services:
     startCommand: gunicorn --bind 0.0.0.0:$PORT viral_clip_backend:app
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.9
+        value: 3.9.18
       - key: VITE_GEMINI_API_KEY
         sync: false
       - key: UPLOAD_FOLDER
@@ -18,4 +18,5 @@ services:
       name: video-storage
       mountPath: /opt/render/project
       sizeGB: 10
+
 
