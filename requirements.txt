@@ -1,0 +1,13 @@
+Flask==2.3.3
+Flask-CORS==4.0.0
+Werkzeug==2.3.7
+google-generativeai==0.3.2
+openai-whisper==20231117
+moviepy==1.0.3
+numpy==1.24.3
+python-dotenv==1.0.0
+yt-dlp==2023.11.16
+librosa==0.10.1
+Pillow==10.0.1
+requests==2.31.0
+gunicorn==21.2.0

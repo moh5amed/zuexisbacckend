@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: viral-clip-backend
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT viral_clip_backend:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.9.16
+      - key: VITE_GEMINI_API_KEY
+        sync: false
+      - key: UPLOAD_FOLDER
+        value: uploads
+      - key: OUTPUT_FOLDER
+        value: viral_clips
+    disk:
+      name: video-storage
+      mountPath: /opt/render/project
+      sizeGB: 10
