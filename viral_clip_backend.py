@@ -4031,7 +4031,7 @@ class ViralClipGenerator:
 # Flask Application Setup
 app = Flask(__name__)
 
-# Configure CORS to allow frontend requests from all localhost ports
+# Configure CORS to allow frontend requests from all localhost ports and Render domain
 CORS(app, 
      origins=[
          "http://localhost:3000",  # Default Vite port
@@ -4039,7 +4039,9 @@ CORS(app,
          "http://localhost:4173",  # Vite preview port
          "http://127.0.0.1:3000",
          "http://127.0.0.1:5173",
-         "http://127.0.0.1:4173"
+         "http://127.0.0.1:4173",
+         "https://zuexisbacckend.onrender.com",  # Render backend domain
+         "https://*.onrender.com"  # Allow all Render subdomains
      ],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
      allow_headers=["Content-Type", "Authorization"],
@@ -4421,9 +4423,51 @@ def frontend_connect():
 def frontend_process_project():
     """Process project from frontend with comprehensive input handling"""
     try:
-        data = request.get_json()
+        # Log request details for debugging
+        print(f"🚀 [Backend] ===== PROCESS-PROJECT REQUEST RECEIVED =====")
+        print(f"📊 [Backend] Request Method: {request.method}")
+        print(f"📊 [Backend] Content-Type: {request.content_type}")
+        print(f"📊 [Backend] Content-Length: {request.content_length}")
+        print(f"📊 [Backend] Headers: {dict(request.headers)}")
+        print(f"📊 [Backend] Form Data Keys: {list(request.form.keys()) if request.form else 'None'}")
+        print(f"📊 [Backend] Files Keys: {list(request.files.keys()) if request.files else 'None'}")
+        
+        # Handle both JSON and FormData requests
+        if request.content_type and 'multipart/form-data' in request.content_type:
+            # Handle FormData request
+            data = {
+                'projectName': request.form.get('projectName'),
+                'sourceType': request.form.get('sourceType'),
+                'description': request.form.get('description', ''),
+                'aiPrompt': request.form.get('aiPrompt', ''),
+                'targetPlatforms': json.loads(request.form.get('targetPlatforms', '["tiktok"]')),
+                'numClips': int(request.form.get('numClips', 3)),
+                'processingOptions': json.loads(request.form.get('processingOptions', '{}')),
+                'videoFile': request.files.get('videoFile') if 'videoFile' in request.files else None
+            }
+            print(f"📁 [Backend] Received FormData request with video file: {data['videoFile'].filename if data['videoFile'] else 'None'}")
+            print(f"📁 [Backend] FormData fields: {list(request.form.keys())}")
+            print(f"📁 [Backend] FormData files: {list(request.files.keys())}")
+        else:
+            # Handle JSON request
+            data = request.get_json()
+            print(f"📁 [Backend] Received JSON request")
+            print(f"📁 [Backend] JSON data keys: {list(data.keys()) if data else 'None'}")
         
         # Validate required fields
+        print(f"📊 [Backend] ===== EXTRACTED DATA =====")
+        print(f"📊 [Backend] Project Name: {data.get('projectName', 'MISSING')}")
+        print(f"📊 [Backend] Source Type: {data.get('sourceType', 'MISSING')}")
+        print(f"📊 [Backend] Description: {data.get('description', 'MISSING')}")
+        print(f"📊 [Backend] AI Prompt: {data.get('aiPrompt', 'MISSING')[:50]}...")
+        print(f"📊 [Backend] Target Platforms: {data.get('targetPlatforms', 'MISSING')}")
+        print(f"📊 [Backend] Number of Clips: {data.get('numClips', 'MISSING')}")
+        print(f"📊 [Backend] Processing Options: {data.get('processingOptions', 'MISSING')}")
+        print(f"📊 [Backend] Video File Type: {type(data.get('videoFile', 'MISSING'))}")
+        if data.get('videoFile') and hasattr(data['videoFile'], 'filename'):
+            print(f"📊 [Backend] Video File Name: {data['videoFile'].filename}")
+            print(f"📊 [Backend] Video File Size: {data['videoFile'].content_length if hasattr(data['videoFile'], 'content_length') else 'Unknown'}")
+        
         required_fields = ['projectName', 'sourceType']
         for field in required_fields:
             if field not in data:
@@ -4442,8 +4486,27 @@ def frontend_process_project():
                 return jsonify({'error': 'Video file required for file upload'}), 400
             video_file = data['videoFile']
             
+            # Handle FormData file upload
+            if hasattr(video_file, 'filename') and video_file.filename:
+                # This is a FormData file upload
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                # Sanitize project name for filename
+                safe_project_name = "".join(c for c in project_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                safe_project_name = safe_project_name.replace(' ', '_')[:30]  # Limit length and replace spaces
+                safe_filename = f"{timestamp}_{safe_project_name}.mp4"
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], safe_filename)
+                
+                print(f"📁 [Backend] Saving FormData video file to: {filepath}")
+                print(f"📝 [Backend] Project name: '{project_name}' -> Safe name: '{safe_project_name}'")
+                print(f"📁 [Backend] Original filename: {video_file.filename}")
+                
+                # Save the uploaded file
+                video_file.save(filepath)
+                
+                print(f"✅ [Backend] FormData video saved successfully: {os.path.getsize(filepath)} bytes")
+                
             # Handle base64 video data
-            if isinstance(video_file, str) and video_file.startswith('data:'):
+            elif isinstance(video_file, str) and video_file.startswith('data:'):
                 import base64
                 video_data = video_file.split(',')[1]
                 video_bytes = base64.b64decode(video_data)
@@ -4456,15 +4519,15 @@ def frontend_process_project():
                 safe_filename = f"{timestamp}_{safe_project_name}.mp4"
                 filepath = os.path.join(app.config['UPLOAD_FOLDER'], safe_filename)
                 
-                print(f"📁 Saving video to: {filepath}")
-                print(f"📝 Project name: '{project_name}' -> Safe name: '{safe_project_name}'")
+                print(f"📁 [Backend] Saving base64 video to: {filepath}")
+                print(f"📝 [Backend] Project name: '{project_name}' -> Safe name: '{safe_project_name}'")
                 
                 with open(filepath, 'wb') as f:
                     f.write(video_bytes)
                 
-                print(f"✅ Video saved successfully: {os.path.getsize(filepath)} bytes")
+                print(f"✅ [Backend] Base64 video saved successfully: {os.path.getsize(filepath)} bytes")
             else:
-                return jsonify({'error': 'Invalid video file format'}), 400
+                return jsonify({'error': f'Invalid video file format. Expected File object or base64 string, got: {type(video_file)}'}), 400
                 
         elif source_type == 'url':
             if 'sourceUrl' not in data:
@@ -4597,6 +4660,12 @@ def frontend_process_project():
             return jsonify({'error': f'Failed to create output directory: {str(e)}'}), 500
         
         # Process video using the same logic as frontend with enhanced AI prompts
+        print(f"🎬 [Backend] ===== STARTING VIDEO PROCESSING =====")
+        print(f"🎬 [Backend] File path: {filepath}")
+        print(f"🎬 [Backend] File size: {file_size} bytes ({file_size / (1024*1024):.2f} MB)")
+        print(f"🎬 [Backend] Number of clips: {num_clips}")
+        print(f"🎬 [Backend] AI Prompt: {ai_prompt[:100]}...")
+        
         app.logger.info("🔄 [Progress] Processing video with AI analysis...")
         clips, transcription = generator.generate_viral_clips(filepath, num_clips, frontend_inputs)
         
@@ -4677,9 +4746,20 @@ def frontend_process_project():
         }
         
         app.logger.info(f"Frontend project processing complete: {len(enhanced_clips)} clips generated")
+        
+        # Log final response details
+        print(f"✅ [Backend] ===== PROCESS-PROJECT COMPLETED SUCCESSFULLY =====")
+        print(f"📊 [Backend] Project: {project_name}")
+        print(f"📊 [Backend] Clips Generated: {len(enhanced_clips)}")
+        print(f"📊 [Backend] Output Directory: {app.config['OUTPUT_FOLDER']}")
+        print(f"📊 [Backend] Response Size: {len(str(response_data))} characters")
+        
         return jsonify(response_data)
         
     except Exception as e:
+        print(f"❌ [Backend] ===== PROCESS-PROJECT FAILED =====")
+        print(f"❌ [Backend] Error: {str(e)}")
+        print(f"❌ [Backend] Error Type: {type(e).__name__}")
         app.logger.error(f"Frontend project processing failed: {e}")
         return jsonify({'error': f'Project processing failed: {str(e)}'}), 500
 
