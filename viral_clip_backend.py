@@ -4042,6 +4042,16 @@ CORS(app,
      max_age=3600  # Cache preflight response for 1 hour
 )
 
+# Add CORS headers to all responses
+@app.after_request
+def after_request(response):
+    """Add CORS headers to all responses"""
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    response.headers['Access-Control-Max-Age'] = '3600'
+    return response
+
 # Configuration
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
 app.config['UPLOAD_FOLDER'] = 'uploads'
@@ -4156,8 +4166,16 @@ def health_check():
     
     return response
 
-@app.route('/', methods=['GET'])
+@app.route('/', methods=['GET', 'OPTIONS'])
 def root():
+    if request.method == 'OPTIONS':
+        # Handle preflight request
+        response = jsonify({'message': 'Root endpoint preflight successful'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Max-Age'] = '3600'
+        return response
     """Root endpoint for basic connectivity test"""
     return jsonify({
         'message': 'Viral Clip Generator Backend',
@@ -4174,8 +4192,16 @@ def root():
         }
     })
 
-@app.route('/api/upload', methods=['POST'])
+@app.route('/api/upload', methods=['POST', 'OPTIONS'])
 def upload_video():
+    if request.method == 'OPTIONS':
+        # Handle preflight request
+        response = jsonify({'message': 'Upload endpoint preflight successful'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Max-Age'] = '3600'
+        return response
     """Upload video file endpoint"""
     try:
         if 'video' not in request.files:
@@ -4210,8 +4236,16 @@ def upload_video():
         app.logger.error(f"Upload failed: {e}")
         return jsonify({'error': f'Upload failed: {str(e)}'}), 500
 
-@app.route('/api/process', methods=['POST'])
+@app.route('/api/process', methods=['POST', 'OPTIONS'])
 def process_video():
+    if request.method == 'OPTIONS':
+        # Handle preflight request
+        response = jsonify({'message': 'Process endpoint preflight successful'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Max-Age'] = '3600'
+        return response
     """Process video and generate viral clips endpoint"""
     try:
         data = request.get_json()
@@ -4355,8 +4389,16 @@ def get_analysis(filename):
         return jsonify({'error': f'Failed to get analysis: {str(e)}'}), 500
 
 # Frontend Integration Routes
-@app.route('/api/frontend/status', methods=['GET'])
+@app.route('/api/frontend/status', methods=['GET', 'OPTIONS'])
 def frontend_status():
+    if request.method == 'OPTIONS':
+        # Handle preflight request
+        response = jsonify({'message': 'Frontend status preflight successful'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Max-Age'] = '3600'
+        return response
     """Get frontend integration status"""
     return jsonify({
         'backend_ready': True,
@@ -4408,8 +4450,16 @@ def frontend_status():
         'timestamp': datetime.now().isoformat()
     })
 
-@app.route('/api/frontend/connect', methods=['POST'])
+@app.route('/api/frontend/connect', methods=['POST', 'OPTIONS'])
 def frontend_connect():
+    if request.method == 'OPTIONS':
+        # Handle preflight request
+        response = jsonify({'message': 'Frontend connect preflight successful'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Max-Age'] = '3600'
+        return response
     """Test frontend-backend connectivity"""
     try:
         data = request.get_json()
@@ -4428,8 +4478,16 @@ def frontend_connect():
         app.logger.error(f"Frontend connection test failed: {e}")
         return jsonify({'error': f'Connection test failed: {str(e)}'}), 500
 
-@app.route('/api/frontend/upload-chunk', methods=['POST'])
+@app.route('/api/frontend/upload-chunk', methods=['POST', 'OPTIONS'])
 def frontend_upload_chunk():
+    if request.method == 'OPTIONS':
+        # Handle preflight request
+        response = jsonify({'message': 'Chunk upload preflight successful'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Max-Age'] = '3600'
+        return response
     """Handle chunked video uploads"""
     try:
         print(f"📦 [Backend] ===== CHUNK UPLOAD REQUEST RECEIVED =====")
@@ -4537,8 +4595,16 @@ def process_complete_video(file_path: str, form_data: dict):
         print(f"❌ [Backend] Video processing failed: {str(e)}")
         return jsonify({'error': f'Video processing failed: {str(e)}'}), 500
 
-@app.route('/api/frontend/process-project', methods=['POST'])
+@app.route('/api/frontend/process-project', methods=['POST', 'OPTIONS'])
 def frontend_process_project():
+    if request.method == 'OPTIONS':
+        # Handle preflight request
+        response = jsonify({'message': 'Process project preflight successful'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Max-Age'] = '3600'
+        return response
     """Process project from frontend with comprehensive input handling"""
     try:
         # Log request details for debugging
@@ -5018,8 +5084,16 @@ def frontend_test_video_display():
         app.logger.error(f"Failed to get test video data: {e}")
         return jsonify({'error': f'Failed to get test video data: {str(e)}'}), 500
 
-@app.route('/api/frontend/create-project', methods=['POST'])
+@app.route('/api/frontend/create-project', methods=['POST', 'OPTIONS'])
 def frontend_create_project():
+    if request.method == 'OPTIONS':
+        # Handle preflight request
+        response = jsonify({'message': 'Create project preflight successful'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Max-Age'] = '3600'
+        return response
     """Create a new project from frontend"""
     try:
         data = request.get_json()
@@ -5057,8 +5131,16 @@ def frontend_create_project():
         app.logger.error(f"Frontend project creation failed: {e}")
         return jsonify({'error': f'Project creation failed: {str(e)}'}), 500
 
-@app.route('/api/frontend/upload-file', methods=['POST'])
+@app.route('/api/frontend/upload-file', methods=['POST', 'OPTIONS'])
 def frontend_upload_file():
+    if request.method == 'OPTIONS':
+        # Handle preflight request
+        response = jsonify({'message': 'Upload file preflight successful'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Max-Age'] = '3600'
+        return response
     """Handle file upload from frontend"""
     try:
         if 'file' not in request.files:
@@ -5481,8 +5563,16 @@ def test_cors():
     
     return response
 
-@app.route('/api/frontend/google-oauth', methods=['POST'])
+@app.route('/api/frontend/google-oauth', methods=['POST', 'OPTIONS'])
 def google_oauth_exchange():
+    if request.method == 'OPTIONS':
+        # Handle preflight request
+        response = jsonify({'message': 'Google OAuth preflight successful'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Max-Age'] = '3600'
+        return response
     """Exchange Google OAuth authorization code for access and refresh tokens"""
     try:
         data = request.get_json()
@@ -5553,8 +5643,16 @@ def google_oauth_exchange():
         app.logger.error(f"Google OAuth endpoint error: {e}")
         return jsonify({'error': f'OAuth exchange failed: {str(e)}'}), 500
 
-@app.route('/api/frontend/test-google-token', methods=['POST'])
+@app.route('/api/frontend/test-google-token', methods=['POST', 'OPTIONS'])
 def test_google_token():
+    if request.method == 'OPTIONS':
+        # Handle preflight request
+        response = jsonify({'message': 'Test Google token preflight successful'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Max-Age'] = '3600'
+        return response
     """Test if a Google access token is valid and can access user info"""
     try:
         data = request.get_json()
