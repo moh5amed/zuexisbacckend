@@ -4028,7 +4028,7 @@ class ViralClipGenerator:
         
         return round(enhanced_score, 1)
 
-    async def process_video(self, video_path: str, project_data: dict):
+    def process_video(self, video_path: str, project_data: dict):
         """Process video and return clips with transcription and analysis"""
         try:
             print(f"🎬 [ViralClipGenerator] Starting video processing for: {video_path}")
@@ -4562,7 +4562,7 @@ def frontend_connect():
         app.logger.error(f"Frontend connection test failed: {e}")
         return jsonify({'error': f'Connection test failed: {str(e)}'}), 500
 
-async def process_video_with_generator(
+def process_video_with_generator(
     video_path: str,
     project_name: str,
     description: str,
@@ -4596,7 +4596,7 @@ async def process_video_with_generator(
         
         # Process the video using the existing generator
         # This should use the same logic that was working locally
-        result = await generator.process_video(
+        result = generator.process_video(
             video_path,
             project_data
         )
@@ -4620,7 +4620,7 @@ async def process_video_with_generator(
         return {'success': False, 'error': str(e)}
 
 @app.route('/api/frontend/upload-chunk', methods=['POST', 'OPTIONS'])
-async def frontend_upload_chunk():
+def frontend_upload_chunk():
     if request.method == 'OPTIONS':
         # Handle preflight request
         response = jsonify({'message': 'Chunk upload preflight successful'})
@@ -4718,7 +4718,7 @@ async def frontend_upload_chunk():
                 print("🎬 [Backend] Starting video processing pipeline...")
                 
                 # Process the video using the existing generator
-                processing_result = await process_video_with_generator(
+                processing_result = process_video_with_generator(
                     final_file_path,
                     project_name,
                     description,
