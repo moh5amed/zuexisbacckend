@@ -4675,24 +4675,50 @@ def frontend_upload_chunk():
             # Reconstruct the complete file
             final_file_path = os.path.join(app.config['UPLOAD_FOLDER'], project_id, file_name)
             
-            with open(final_file_path, 'wb') as final_file:
-                for i in range(total_chunks):
-                    chunk_path = os.path.join(app.config['UPLOAD_FOLDER'], project_id, f"chunk_{i:04d}.blob")
-                    if os.path.exists(chunk_path):
+            # Check if all chunks exist before starting reconstruction
+            missing_chunks = []
+            for i in range(total_chunks):
+                chunk_path = os.path.join(app.config['UPLOAD_FOLDER'], project_id, f"chunk_{i:04d}.blob")
+                if not os.path.exists(chunk_path):
+                    missing_chunks.append(i)
+            
+            if missing_chunks:
+                print(f"❌ [Backend] Missing chunks: {missing_chunks}")
+                error_response = jsonify({
+                    'error': f'Missing chunks: {missing_chunks}',
+                    'message': 'Some chunks were lost. Please try uploading again.',
+                    'chunkIndex': chunk_index,
+                    'totalChunks': total_chunks,
+                    'missingChunks': missing_chunks
+                })
+                return error_response, 400
+            
+            # All chunks exist, proceed with reconstruction
+            try:
+                with open(final_file_path, 'wb') as final_file:
+                    for i in range(total_chunks):
+                        chunk_path = os.path.join(app.config['UPLOAD_FOLDER'], project_id, f"chunk_{i:04d}.blob")
                         with open(chunk_path, 'rb') as chunk_file:
                             final_file.write(chunk_file.read())
                         # Clean up chunk file
                         os.remove(chunk_path)
-                    else:
-                        print(f"❌ [Backend] Missing chunk {i}")
-                        error_response = jsonify({'error': f'Missing chunk {i}'})
-                        return error_response, 400
+                        print(f"✅ [Backend] Processed and cleaned up chunk {i}")
+            except Exception as reconstruction_error:
+                print(f"❌ [Backend] Error during file reconstruction: {reconstruction_error}")
+                error_response = jsonify({
+                    'error': f'File reconstruction failed: {str(reconstruction_error)}',
+                    'message': 'Failed to reconstruct video file. Please try again.',
+                    'chunkIndex': chunk_index,
+                    'totalChunks': total_chunks
+                })
+                return error_response, 500
             
             print(f"✅ [Backend] File reconstructed successfully: {final_file_path}")
             print(f"✅ [Backend] Final file size: {os.path.getsize(final_file_path)} bytes")
             
             # Now process the complete video
             print(f"🎬 [Backend] Starting video processing for reconstructed file...")
+            print(f"⏱️ [Backend] Processing started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             
             try:
                 # Extract project data from form
@@ -4716,17 +4742,44 @@ def frontend_upload_chunk():
                     raise Exception("Video processing service not available")
                 
                 print("🎬 [Backend] Starting video processing pipeline...")
+                print(f"⏱️ [Backend] Processing timeout set to: 8 minutes")
                 
-                # Process the video using the existing generator
-                processing_result = process_video_with_generator(
-                    final_file_path,
-                    project_name,
-                    description,
-                    ai_prompt,
-                    target_platforms,
-                    num_clips,
-                    processing_options
-                )
+                # Process the video using the existing generator with timeout protection
+                try:
+                    import signal
+                    
+                    def timeout_handler(signum, frame):
+                        raise TimeoutError("Video processing timed out after 8 minutes")
+                    
+                    # Set timeout for video processing (8 minutes)
+                    signal.signal(signal.SIGALRM, timeout_handler)
+                    signal.alarm(480)  # 8 minutes
+                    
+                    processing_result = process_video_with_generator(
+                        final_file_path,
+                        project_name,
+                        description,
+                        ai_prompt,
+                        target_platforms,
+                        num_clips,
+                        processing_options
+                    )
+                    
+                    # Clear the alarm
+                    signal.alarm(0)
+                    
+                except TimeoutError as timeout_err:
+                    print(f"⏰ [Backend] Video processing timed out: {timeout_err}")
+                    processing_result = {
+                        'success': False,
+                        'error': 'Video processing timed out. Please try with a shorter video or contact support.'
+                    }
+                except Exception as proc_error:
+                    print(f"❌ [Backend] Error during video processing: {proc_error}")
+                    processing_result = {
+                        'success': False,
+                        'error': f'Video processing failed: {str(proc_error)}'
+                    }
                 
                 if processing_result['success']:
                     print("✅ [Backend] Video processing completed successfully!")
