@@ -4113,7 +4113,7 @@ app = Flask(__name__)
 CORS(app, 
      origins="*",  # Allow all origins for now to fix CORS issues
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-     allow_headers=["Content-Type", "Authorization"],
+     allow_headers=["Content-Type", "Authorization", "Content-Length", "Accept", "Origin", "X-Requested-With"],
      supports_credentials=False,  # Disable credentials for wildcard origins
      max_age=3600  # Cache preflight response for 1 hour
 )
@@ -4124,8 +4124,16 @@ def after_request(response):
     """Add CORS headers to all responses"""
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Content-Length, Accept, Origin, X-Requested-With'
     response.headers['Access-Control-Max-Age'] = '3600'
+    
+    # Handle preflight requests
+    if request.method == 'OPTIONS':
+        response.status_code = 200
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Content-Length, Accept, Origin, X-Requested-With'
+    
     return response
 
 # Configuration
@@ -5991,32 +5999,42 @@ def main():
         print("Starting Viral Clip Generator Backend...")
         print("=" * 60)
         
-        # Check environment variables
-        api_key = os.getenv('VITE_GEMINI_API_KEY')
+        # Check environment variables - support both local and production
+        api_key = os.getenv('VITE_GEMINI_API_KEY') or os.getenv('GEMINI_API_KEY')
         if not api_key:
-            print("VITE_GEMINI_API_KEY not found in .env.local file")
-            print("Please create .env.local file with your Gemini API key:")
-            print("   VITE_GEMINI_API_KEY=your_actual_api_key_here")
+            print("❌ GEMINI_API_KEY not found in environment variables")
+            print("Please set GEMINI_API_KEY in your environment:")
+            print("   Local: Create .env.local file with VITE_GEMINI_API_KEY=your_key")
+            print("   Production: Set GEMINI_API_KEY in Render environment variables")
             return
         
-        print(f"Environment variables loaded successfully")
+        print(f"✅ Environment variables loaded successfully")
         print(f"API Key: {api_key[:10]}...")
         
         # Initialize services
         if not initialize_services():
-            print("Failed to initialize services. Exiting.")
+            print("❌ Failed to initialize services. Exiting.")
             return
         
-        print(f"Upload folder: {app.config['UPLOAD_FOLDER']}")
-        print(f"Output folder: {app.config['OUTPUT_FOLDER']}")
-        print("Server will be available at: http://localhost:5000")
-        print("API Documentation available at: http://localhost:5000/api/health")
-        print("Frontend integration endpoints available")
+        print(f"📁 Upload folder: {app.config['UPLOAD_FOLDER']}")
+        print(f"📁 Output folder: {app.config['OUTPUT_FOLDER']}")
+        
+        # Get deployment info
+        port = int(os.environ.get('PORT', 5000))
+        is_production = os.environ.get('RENDER', 'false').lower() == 'true'
+        
+        if is_production:
+            print(f"🚀 Production deployment detected (Render)")
+            print(f"Server will be available on port: {port}")
+        else:
+            print(f"🖥️ Local development mode")
+            print(f"Server will be available at: http://localhost:{port}")
+        
+        print(f"📚 API Documentation available at: /api/health")
+        print(f"🌐 Frontend integration endpoints available")
         print("=" * 60)
         
         # Run Flask app
-        # For Render deployment, use environment port
-        port = int(os.environ.get('PORT', 5000))
         app.run(
             host='0.0.0.0',
             port=port,
@@ -6025,15 +6043,14 @@ def main():
         )
         
     except Exception as e:
-        print(f"Failed to start server: {e}")
-        print("Make sure you have the required dependencies installed:")
-        print("   pip install -r requirements.txt")
-        print("   or manually install:")
-        print("   pip install flask flask-cors python-dotenv google-generativeai openai-whisper moviepy")
-        print("\nAlso ensure:")
-        print("   1. .env.local file exists with VITE_GEMINI_API_KEY")
-        print("   2. Python 3.8+ is installed")
-        print("   3. Sufficient disk space for video processing")
+        print(f"❌ Failed to start server: {e}")
+        import traceback
+        traceback.print_exc()
+        print("\n🔧 Troubleshooting:")
+        print("   1. Check environment variables (GEMINI_API_KEY)")
+        print("   2. Ensure all dependencies are installed")
+        print("   3. Check disk space and permissions")
+        print("   4. For production: Check Render logs and environment variables")
 
 if __name__ == "__main__":
     main()
