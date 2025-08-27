@@ -14,3 +14,4 @@ gunicorn>=20.0.0
 setuptools>=60.0.0
 wheel>=0.37.0
 ffmpeg-python>=0.2.0
+psutil>=5.8.0
