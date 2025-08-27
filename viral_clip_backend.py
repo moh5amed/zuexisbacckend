@@ -4843,9 +4843,11 @@ def frontend_upload_chunk():
                 print("🎬 [Backend] Starting video processing pipeline...")
                 print(f"⏱️ [Backend] Processing timeout set to: 8 minutes")
                 
-                # Process the video using the existing generator with timeout protection
+                # Process the video using the existing generator with timeout protection and memory management
                 try:
                     import signal
+                    import gc
+                    import psutil
                     
                     def timeout_handler(signum, frame):
                         raise TimeoutError("Video processing timed out after 8 minutes")
@@ -4853,6 +4855,19 @@ def frontend_upload_chunk():
                     # Set timeout for video processing (8 minutes)
                     signal.signal(signal.SIGALRM, timeout_handler)
                     signal.alarm(480)  # 8 minutes
+                    
+                    # Memory management before processing
+                    print(f"🧠 [Backend] Memory before processing: {psutil.Process().memory_info().rss / 1024 / 1024:.1f} MB")
+                    gc.collect()  # Force garbage collection
+                    
+                    # Set memory limits for processing
+                    import resource
+                    try:
+                        # Set memory limit to 2GB (2048 MB)
+                        resource.setrlimit(resource.RLIMIT_AS, (2 * 1024 * 1024 * 1024, -1))
+                        print(f"🧠 [Backend] Memory limit set to 2GB")
+                    except Exception as mem_error:
+                        print(f"⚠️ [Backend] Could not set memory limit: {mem_error}")
                     
                     processing_result = process_video_with_generator(
                         final_file_path,
@@ -4866,6 +4881,10 @@ def frontend_upload_chunk():
                     
                     # Clear the alarm
                     signal.alarm(0)
+                    
+                    # Memory cleanup after processing
+                    gc.collect()
+                    print(f"🧠 [Backend] Memory after processing: {psutil.Process().memory_info().rss / 1024 / 1024:.1f} MB")
                     
                 except TimeoutError as timeout_err:
                     print(f"⏰ [Backend] Video processing timed out: {timeout_err}")
