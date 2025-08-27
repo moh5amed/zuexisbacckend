@@ -4028,6 +4028,82 @@ class ViralClipGenerator:
         
         return round(enhanced_score, 1)
 
+    async def process_video(self, video_path: str, project_data: dict):
+        """Process video and return clips with transcription and analysis"""
+        try:
+            print(f"🎬 [ViralClipGenerator] Starting video processing for: {video_path}")
+            
+            # Extract parameters from project data
+            num_clips = project_data.get('numClips', 3)
+            ai_prompt = project_data.get('aiPrompt', '')
+            target_platforms = project_data.get('targetPlatforms', ['tiktok'])
+            processing_options = project_data.get('processingOptions', {})
+            
+            print(f"📊 [ViralClipGenerator] Processing parameters:")
+            print(f"   - Number of clips: {num_clips}")
+            print(f"   - AI Prompt: {ai_prompt[:50]}...")
+            print(f"   - Target platforms: {target_platforms}")
+            
+            # Create frontend inputs structure for compatibility
+            frontend_inputs = {
+                'ai_prompt': ai_prompt,
+                'target_platforms': target_platforms,
+                'processing_options': processing_options
+            }
+            
+            # Generate viral clips using existing method
+            print("🎬 [ViralClipGenerator] Calling generate_viral_clips...")
+            clips, transcription = self.generate_viral_clips(video_path, num_clips, frontend_inputs)
+            
+            if not clips:
+                print("❌ [ViralClipGenerator] No clips generated")
+                return {
+                    'success': False,
+                    'error': 'No clips were generated'
+                }
+            
+            print(f"✅ [ViralClipGenerator] Successfully generated {len(clips)} clips")
+            
+            # Prepare clips data for frontend
+            clips_data = []
+            for i, clip in enumerate(clips):
+                clip_info = {
+                    'id': f"clip_{i+1}",
+                    'name': clip.get('name', f'Clip {i+1}'),
+                    'start_time': clip.get('start_time', 0),
+                    'end_time': clip.get('end_time', 0),
+                    'duration': clip.get('duration', 0),
+                    'caption': clip.get('caption', ''),
+                    'hashtags': clip.get('hashtags', []),
+                    'platforms': clip.get('platforms', target_platforms),
+                    'viral_score': clip.get('viral_score', 8.0),
+                    'file_path': clip.get('file_path', ''),
+                    'thumbnail_path': clip.get('thumbnail_path', ''),
+                    'transcription': clip.get('transcription', ''),
+                    'ai_insights': clip.get('ai_insights', {})
+                }
+                clips_data.append(clip_info)
+            
+            # Return success with all data
+            return {
+                'success': True,
+                'clips': clips_data,
+                'transcription': transcription,
+                'analysis': {
+                    'total_clips': len(clips),
+                    'video_path': video_path,
+                    'processing_options': processing_options
+                },
+                'message': f'Successfully generated {len(clips)} viral clips'
+            }
+            
+        except Exception as e:
+            print(f"❌ [ViralClipGenerator] Error in process_video: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
 # Flask Application Setup
 app = Flask(__name__)
 
@@ -4478,8 +4554,65 @@ def frontend_connect():
         app.logger.error(f"Frontend connection test failed: {e}")
         return jsonify({'error': f'Connection test failed: {str(e)}'}), 500
 
+async def process_video_with_generator(
+    video_path: str,
+    project_name: str,
+    description: str,
+    ai_prompt: str,
+    target_platforms: list,
+    num_clips: int,
+    processing_options: dict
+):
+    """Process video using the existing ViralClipGenerator"""
+    try:
+        print(f"🎬 [Backend] ===== PROCESSING VIDEO WITH GENERATOR =====")
+        print(f"📁 [Backend] Video path: {video_path}")
+        print(f"📊 [Backend] Project: {project_name}")
+        print(f"📝 [Backend] AI Prompt: {ai_prompt[:100]}...")
+        
+        # Check if generator is available
+        if generator is None:
+            return {'success': False, 'error': 'Video processing service not available'}
+        
+        # Create project data structure
+        project_data = {
+            'projectName': project_name,
+            'description': description,
+            'aiPrompt': ai_prompt,
+            'targetPlatforms': target_platforms,
+            'numClips': num_clips,
+            'processingOptions': processing_options
+        }
+        
+        print("🎬 [Backend] Starting video processing...")
+        
+        # Process the video using the existing generator
+        # This should use the same logic that was working locally
+        result = await generator.process_video(
+            video_path,
+            project_data
+        )
+        
+        if result and result.get('success'):
+            print("✅ [Backend] Video processing completed successfully!")
+            return {
+                'success': True,
+                'clips': result.get('clips', []),
+                'transcription': result.get('transcription', ''),
+                'analysis': result.get('analysis', {}),
+                'message': 'Video processed successfully'
+            }
+        else:
+            error_msg = result.get('error', 'Unknown processing error') if result else 'Processing failed'
+            print(f"❌ [Backend] Video processing failed: {error_msg}")
+            return {'success': False, 'error': error_msg}
+            
+    except Exception as e:
+        print(f"❌ [Backend] Error in process_video_with_generator: {e}")
+        return {'success': False, 'error': str(e)}
+
 @app.route('/api/frontend/upload-chunk', methods=['POST', 'OPTIONS'])
-def frontend_upload_chunk():
+async def frontend_upload_chunk():
     if request.method == 'OPTIONS':
         # Handle preflight request
         response = jsonify({'message': 'Chunk upload preflight successful'})
@@ -4550,16 +4683,79 @@ def frontend_upload_chunk():
             print(f"✅ [Backend] File reconstructed successfully: {final_file_path}")
             print(f"✅ [Backend] Final file size: {os.path.getsize(final_file_path)} bytes")
             
-            # For now, just return success instead of processing (to avoid hanging)
-            # TODO: Implement proper video processing
-            success_response = jsonify({
-                'success': True,
-                'message': f'All {total_chunks} chunks uploaded and file reconstructed successfully',
-                'chunkIndex': chunk_index,
-                'totalChunks': total_chunks,
-                'filePath': final_file_path
-            })
-            return success_response
+            # Now process the complete video
+            print(f"🎬 [Backend] Starting video processing for reconstructed file...")
+            
+            try:
+                # Extract project data from form
+                project_name = request.form.get('projectName', 'Unknown Project')
+                description = request.form.get('description', '')
+                ai_prompt = request.form.get('aiPrompt', '')
+                target_platforms = json.loads(request.form.get('targetPlatforms', '["tiktok"]'))
+                num_clips = int(request.form.get('numClips', 3))
+                processing_options = json.loads(request.form.get('processingOptions', '{}'))
+                
+                print(f"📊 [Backend] Processing video with:")
+                print(f"   - Project: {project_name}")
+                print(f"   - Description: {description}")
+                print(f"   - AI Prompt: {ai_prompt[:50]}...")
+                print(f"   - Target Platforms: {target_platforms}")
+                print(f"   - Number of Clips: {num_clips}")
+                
+                # Check if generator is available
+                if generator is None:
+                    print("❌ [Backend] ViralClipGenerator not initialized")
+                    raise Exception("Video processing service not available")
+                
+                print("🎬 [Backend] Starting video processing pipeline...")
+                
+                # Process the video using the existing generator
+                processing_result = await process_video_with_generator(
+                    final_file_path,
+                    project_name,
+                    description,
+                    ai_prompt,
+                    target_platforms,
+                    num_clips,
+                    processing_options
+                )
+                
+                if processing_result['success']:
+                    print("✅ [Backend] Video processing completed successfully!")
+                    print(f"📊 [Backend] Generated {len(processing_result['clips'])} clips")
+                    
+                    # Return the actual processing results
+                    success_response = jsonify({
+                        'success': True,
+                        'message': f'Video processed successfully! Generated {len(processing_result["clips"])} clips',
+                        'chunkIndex': chunk_index,
+                        'totalChunks': total_chunks,
+                        'filePath': final_file_path,
+                        'processingStarted': True,
+                        'processingCompleted': True,
+                        'clips': processing_result['clips'],
+                        'transcription': processing_result.get('transcription', ''),
+                        'analysis': processing_result.get('analysis', {})
+                    })
+                    return success_response
+                else:
+                    print(f"❌ [Backend] Video processing failed: {processing_result.get('error', 'Unknown error')}")
+                    raise Exception(processing_result.get('error', 'Video processing failed'))
+                
+            except Exception as processing_error:
+                print(f"❌ [Backend] Error during video processing: {processing_error}")
+                # Return success for upload but note processing error
+                success_response = jsonify({
+                    'success': True,
+                    'message': f'Upload successful but processing failed: {str(processing_error)}',
+                    'chunkIndex': chunk_index,
+                    'totalChunks': total_chunks,
+                    'filePath': final_file_path,
+                    'processingStarted': True,
+                    'processingCompleted': False,
+                    'processingError': str(processing_error)
+                })
+                return success_response
         
         # Return success for intermediate chunks
         success_response = jsonify({
