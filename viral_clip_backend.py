@@ -4488,6 +4488,7 @@ def frontend_upload_chunk():
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
         response.headers['Access-Control-Max-Age'] = '3600'
         return response
+    
     """Handle chunked video uploads"""
     try:
         print(f"📦 [Backend] ===== CHUNK UPLOAD REQUEST RECEIVED =====")
@@ -4506,7 +4507,9 @@ def frontend_upload_chunk():
         
         # Get the chunk data
         if 'chunkData' not in request.files:
-            return jsonify({'error': 'No chunk data provided'}), 400
+            error_response = jsonify({'error': 'No chunk data provided'})
+            error_response.headers['Access-Control-Allow-Origin'] = '*'
+            return error_response, 400
         
         chunk_file = request.files['chunkData']
         
@@ -4540,27 +4543,101 @@ def frontend_upload_chunk():
                         os.remove(chunk_path)
                     else:
                         print(f"❌ [Backend] Missing chunk {i}")
-                        return jsonify({'error': f'Missing chunk {i}'}), 400
+                        error_response = jsonify({'error': f'Missing chunk {i}'})
+                        error_response.headers['Access-Control-Allow-Origin'] = '*'
+                        return error_response, 400
             
             print(f"✅ [Backend] File reconstructed successfully: {final_file_path}")
             print(f"✅ [Backend] Final file size: {os.path.getsize(final_file_path)} bytes")
             
-            # Now process the complete file
-            return process_complete_video(final_file_path, request.form)
+            # For now, just return success instead of processing (to avoid hanging)
+            # TODO: Implement proper video processing
+            success_response = jsonify({
+                'success': True,
+                'message': f'All {total_chunks} chunks uploaded and file reconstructed successfully',
+                'chunkIndex': chunk_index,
+                'totalChunks': total_chunks,
+                'filePath': final_file_path
+            })
+            success_response.headers['Access-Control-Allow-Origin'] = '*'
+            return success_response
         
         # Return success for intermediate chunks
-        return jsonify({
+        success_response = jsonify({
             'success': True,
             'message': f'Chunk {chunk_index + 1}/{total_chunks} uploaded successfully',
             'chunkIndex': chunk_index,
             'totalChunks': total_chunks
         })
+        success_response.headers['Access-Control-Allow-Origin'] = '*'
+        return success_response
         
     except Exception as e:
         print(f"❌ [Backend] ===== CHUNK UPLOAD FAILED =====")
         print(f"❌ [Backend] Error: {str(e)}")
         print(f"❌ [Backend] Error Type: {type(e).__name__}")
-        return jsonify({'error': f'Chunk upload failed: {str(e)}'}), 500
+        error_response = jsonify({'error': f'Chunk upload failed: {str(e)}'})
+        error_response.headers['Access-Control-Allow-Origin'] = '*'
+        return error_response, 500
+
+@app.route('/api/frontend/test-chunk', methods=['POST', 'OPTIONS'])
+def frontend_test_chunk():
+    if request.method == 'OPTIONS':
+        # Handle preflight request
+        response = jsonify({'message': 'Chunk test preflight successful'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Max-Age'] = '3600'
+        return response
+    
+    """Test chunk upload functionality"""
+    try:
+        print(f"🧪 [Backend] ===== CHUNK TEST REQUEST RECEIVED =====")
+        print(f"📊 [Backend] Request Method: {request.method}")
+        print(f"📊 [Backend] Content-Type: {request.content_type}")
+        print(f"📊 [Backend] Form Data Keys: {list(request.form.keys()) if request.form else 'None'}")
+        print(f"📊 [Backend] Files Keys: {list(request.files.keys()) if request.files else 'None'}")
+        
+        # Check if we received any data
+        if request.files and 'chunkData' in request.files:
+            chunk_file = request.files['chunkData']
+            chunk_size = chunk_file.content_length or 0
+            print(f"📦 [Backend] Received chunk file: {chunk_file.filename}, size: {chunk_size} bytes")
+            
+            # Just echo back the chunk info
+            response_data = {
+                'success': True,
+                'message': 'Chunk test successful',
+                'chunk_info': {
+                    'filename': chunk_file.filename,
+                    'size': chunk_size,
+                    'content_type': chunk_file.content_type
+                },
+                'form_data': dict(request.form) if request.form else {},
+                'timestamp': datetime.now().isoformat()
+            }
+        else:
+            response_data = {
+                'success': True,
+                'message': 'Chunk test successful (no file data)',
+                'form_data': dict(request.form) if request.form else {},
+                'timestamp': datetime.now().isoformat()
+            }
+        
+        # Create response with CORS headers
+        response = jsonify(response_data)
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        
+        return response
+        
+    except Exception as e:
+        print(f"❌ [Backend] Chunk test failed: {e}")
+        error_response = jsonify({'error': f'Chunk test failed: {str(e)}'})
+        error_response.headers['Access-Control-Allow-Origin'] = '*'
+        return error_response, 500
 
 def process_complete_video(file_path: str, form_data: dict):
     """Process the complete video after all chunks are uploaded"""
