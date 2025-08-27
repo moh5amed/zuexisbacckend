@@ -4619,6 +4619,38 @@ def process_video_with_generator(
         print(f"❌ [Backend] Error in process_video_with_generator: {e}")
         return {'success': False, 'error': str(e)}
 
+@app.route('/api/frontend/upload-status/<project_id>', methods=['GET'])
+def get_upload_status(project_id):
+    """Get upload status for a project"""
+    try:
+        session_file = os.path.join(app.config['UPLOAD_FOLDER'], project_id, 'upload_session.json')
+        if not os.path.exists(session_file):
+            return jsonify({
+                'success': False,
+                'error': 'No upload session found for this project'
+            }), 404
+        
+        with open(session_file, 'r') as f:
+            session_data = json.load(f)
+        
+        return jsonify({
+            'success': True,
+            'project_id': project_id,
+            'file_name': session_data.get('file_name'),
+            'total_chunks': session_data.get('total_chunks'),
+            'uploaded_chunks': session_data.get('uploaded_chunks', []),
+            'uploaded_count': len(session_data.get('uploaded_chunks', [])),
+            'started_at': session_data.get('started_at'),
+            'last_activity': session_data.get('last_activity'),
+            'is_complete': len(session_data.get('uploaded_chunks', [])) == session_data.get('total_chunks')
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to get upload status: {str(e)}'
+        }), 500
+
 @app.route('/api/frontend/upload-chunk', methods=['POST', 'OPTIONS'])
 def frontend_upload_chunk():
     if request.method == 'OPTIONS':
@@ -4660,10 +4692,38 @@ def frontend_upload_chunk():
             project_dir = os.path.join(app.config['UPLOAD_FOLDER'], project_id)
             os.makedirs(project_dir, exist_ok=True)
             print(f"📁 [Backend] Created project directory: {project_dir}")
+            
+            # Create a session file to track upload progress
+            session_file = os.path.join(project_dir, 'upload_session.json')
+            session_data = {
+                'project_id': project_id,
+                'file_name': file_name,
+                'total_chunks': total_chunks,
+                'uploaded_chunks': [],
+                'started_at': datetime.now().isoformat(),
+                'last_activity': datetime.now().isoformat()
+            }
+            with open(session_file, 'w') as f:
+                json.dump(session_data, f)
+            print(f"📝 [Backend] Created upload session: {session_file}")
         
-        # Save chunk to temporary location
+        # Save chunk to persistent storage
         chunk_path = os.path.join(app.config['UPLOAD_FOLDER'], project_id, f"chunk_{chunk_index:04d}.blob")
         chunk_file.save(chunk_path)
+        
+        # Update session file to track this chunk
+        session_file = os.path.join(app.config['UPLOAD_FOLDER'], project_id, 'upload_session.json')
+        if os.path.exists(session_file):
+            try:
+                with open(session_file, 'r') as f:
+                    session_data = json.load(f)
+                session_data['uploaded_chunks'].append(chunk_index)
+                session_data['last_activity'] = datetime.now().isoformat()
+                with open(session_file, 'w') as f:
+                    json.dump(session_data, f)
+                print(f"📝 [Backend] Updated session: chunk {chunk_index} recorded")
+            except Exception as session_error:
+                print(f"⚠️ [Backend] Warning: Could not update session: {session_error}")
         
         print(f"📦 [Backend] Saved chunk {chunk_index + 1} to: {chunk_path}")
         print(f"📦 [Backend] Chunk size: {os.path.getsize(chunk_path)} bytes")
@@ -4672,10 +4732,40 @@ def frontend_upload_chunk():
         if chunk_index == total_chunks - 1:
             print(f"🎬 [Backend] Last chunk received, reconstructing file...")
             
+            # Check session file to see what chunks we actually have
+            session_file = os.path.join(app.config['UPLOAD_FOLDER'], project_id, 'upload_session.json')
+            if os.path.exists(session_file):
+                try:
+                    with open(session_file, 'r') as f:
+                        session_data = json.load(f)
+                    uploaded_chunks = session_data.get('uploaded_chunks', [])
+                    print(f"📊 [Backend] Session shows {len(uploaded_chunks)} chunks uploaded")
+                    
+                    # Check if we have all chunks
+                    missing_chunks = []
+                    for i in range(total_chunks):
+                        if i not in uploaded_chunks:
+                            missing_chunks.append(i)
+                    
+                    if missing_chunks:
+                        print(f"❌ [Backend] Missing chunks based on session: {missing_chunks}")
+                        error_response = jsonify({
+                            'error': f'Missing chunks: {missing_chunks}',
+                            'message': f'Upload incomplete. Missing {len(missing_chunks)} chunks. Please try uploading again.',
+                            'chunkIndex': chunk_index,
+                            'totalChunks': total_chunks,
+                            'missingChunks': missing_chunks,
+                            'uploadedChunks': uploaded_chunks
+                        })
+                        return error_response, 400
+                        
+                except Exception as session_error:
+                    print(f"⚠️ [Backend] Warning: Could not read session file: {session_error}")
+            
             # Reconstruct the complete file
             final_file_path = os.path.join(app.config['UPLOAD_FOLDER'], project_id, file_name)
             
-            # Check if all chunks exist before starting reconstruction
+            # Double-check all chunks exist before starting reconstruction
             missing_chunks = []
             for i in range(total_chunks):
                 chunk_path = os.path.join(app.config['UPLOAD_FOLDER'], project_id, f"chunk_{i:04d}.blob")
@@ -4715,6 +4805,15 @@ def frontend_upload_chunk():
             
             print(f"✅ [Backend] File reconstructed successfully: {final_file_path}")
             print(f"✅ [Backend] Final file size: {os.path.getsize(final_file_path)} bytes")
+            
+            # Clean up session file after successful reconstruction
+            session_file = os.path.join(app.config['UPLOAD_FOLDER'], project_id, 'upload_session.json')
+            if os.path.exists(session_file):
+                try:
+                    os.remove(session_file)
+                    print(f"🧹 [Backend] Cleaned up upload session file")
+                except Exception as cleanup_error:
+                    print(f"⚠️ [Backend] Warning: Could not clean up session file: {cleanup_error}")
             
             # Now process the complete video
             print(f"🎬 [Backend] Starting video processing for reconstructed file...")
