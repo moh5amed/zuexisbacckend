@@ -4803,6 +4803,112 @@ def get_upload_status(project_id):
             'error': f'Failed to get upload status: {str(e)}'
         }), 500
 
+@app.route('/api/frontend/process-video-clips', methods=['POST'])
+def process_video_clips():
+    """New endpoint for processing video with clip instructions from frontend analysis"""
+    try:
+        print("🎬 [Backend] ===== VIDEO CLIP PROCESSING REQUEST =====")
+        
+        # Get form data
+        project_id = request.form.get('projectId')
+        project_name = request.form.get('projectName')
+        clip_instructions_json = request.form.get('clipInstructions')
+        processing_options_json = request.form.get('processingOptions', '{}')
+        
+        print(f"📊 [Backend] Project: {project_name}")
+        print(f"📊 [Backend] Project ID: {project_id}")
+        
+        if not project_id or not project_name or not clip_instructions_json:
+            return jsonify({
+                'success': False,
+                'error': 'Missing required parameters: projectId, projectName, clipInstructions'
+            }), 400
+        
+        # Parse clip instructions
+        try:
+            clip_instructions = json.loads(clip_instructions_json)
+            processing_options = json.loads(processing_options_json)
+        except json.JSONDecodeError as e:
+            return jsonify({
+                'success': False,
+                'error': f'Invalid JSON in clip instructions: {e}'
+            }), 400
+        
+        print(f"📊 [Backend] Processing {len(clip_instructions)} clip instructions")
+        
+        # Find the video file
+        project_dir = Path('uploads') / project_name
+        video_files = list(project_dir.glob('*.mp4'))
+        
+        if not video_files:
+            return jsonify({
+                'success': False,
+                'error': f'No video file found in project directory: {project_dir}'
+            }), 404
+        
+        video_path = video_files[0]  # Use first video file found
+        print(f"📁 [Backend] Processing video: {video_path}")
+        
+        # Import and use the video processor
+        try:
+            from video_processor import VideoProcessor
+            
+            # Create output directory for this project
+            output_dir = Path('viral_clips') / project_name
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Process video with instructions
+            processor = VideoProcessor(str(output_dir))
+            result = processor.process_video_with_instructions(
+                str(video_path),
+                clip_instructions,
+                processing_options
+            )
+            
+            if result['success']:
+                print(f"✅ [Backend] Video processing completed successfully!")
+                print(f"📊 [Backend] Generated {result['clips_processed']} clips")
+                
+                # Save processing result
+                result_path = output_dir / 'processing_result.json'
+                with open(result_path, 'w') as f:
+                    json.dump(result, f, indent=2)
+                
+                return jsonify({
+                    'success': True,
+                    'message': f'Successfully processed {result["clips_processed"]} clips',
+                    'clips': result['clips'],
+                    'processing_result': result,
+                    'output_directory': str(output_dir)
+                })
+            else:
+                print(f"❌ [Backend] Video processing failed: {result.get('error', 'Unknown error')}")
+                return jsonify({
+                    'success': False,
+                    'error': result.get('error', 'Video processing failed')
+                }), 500
+                
+        except ImportError as e:
+            print(f"❌ [Backend] Video processor import failed: {e}")
+            return jsonify({
+                'success': False,
+                'error': 'Video processor not available'
+            }), 500
+        except Exception as e:
+            print(f"❌ [Backend] Video processing error: {e}")
+            return jsonify({
+                'success': False,
+                'error': f'Video processing failed: {str(e)}'
+            }), 500
+            
+    except Exception as e:
+        print(f"❌ [Backend] ===== VIDEO PROCESSING FAILED =====")
+        print(f"❌ [Backend] Error: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'Request processing failed: {str(e)}'
+        }), 500
+
 @app.route('/api/frontend/upload-chunk', methods=['POST', 'OPTIONS'])
 def frontend_upload_chunk():
     if request.method == 'OPTIONS':
