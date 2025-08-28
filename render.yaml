@@ -4,7 +4,7 @@ services:
     env: python
     plan: starter
     buildCommand: pip install -r requirements.txt
-    startCommand: startCommand: gunicorn --bind 0.0.0.0:$PORT --timeout 600 --workers 1 --preload --max-requests 1 --max-requests-jitter 0 wsgi:app
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --timeout 600 --workers 1 --preload --max-requests 1 --max-requests-jitter 0 viral_clip_backend:app
     envVars:
       - key: VITE_GEMINI_API_KEY
         sync: false
@@ -16,6 +16,7 @@ services:
       name: video-storage
       mountPath: /opt/render/project
       sizeGB: 10
+
 
 
 
