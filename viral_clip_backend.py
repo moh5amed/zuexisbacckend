@@ -1075,9 +1075,23 @@ class ViralClipGenerator:
             import gc
             gc.collect()
             
+            # Check if we're in memory-efficient mode
+            import os
+            memory_efficient = os.getenv('MEMORY_EFFICIENT_MODE', 'false').lower() == 'true'
+            
+            if memory_efficient:
+                print("🧠 Memory-efficient mode: Using minimal Whisper configuration")
+                # Set environment variables for memory-efficient processing
+                os.environ['WHISPER_CACHE_DIR'] = '/tmp/whisper_cache'
+                os.environ['CUDA_VISIBLE_DEVICES'] = ''  # Disable CUDA to save memory
+            
             # Use a smaller model for faster loading and less memory usage
             self.whisper_model = whisper.load_model("tiny")
             print("Whisper model loaded successfully!")
+            
+            # Additional memory cleanup after loading
+            gc.collect()
+            
         except Exception as e:
             print(f"Failed to load Whisper model: {str(e)}")
             # If model loading fails, try to clear cache and retry once
@@ -1096,6 +1110,10 @@ class ViralClipGenerator:
                 print("Retrying Whisper model loading...")
                 self.whisper_model = whisper.load_model("tiny")
                 print("Whisper model loaded successfully after cache cleanup!")
+                
+                # Additional memory cleanup after retry
+                gc.collect()
+                
             except Exception as retry_e:
                 print(f"Warning: Whisper model failed to load: {str(retry_e)}")
                 print("Continuing without transcription capabilities...")
@@ -1136,9 +1154,18 @@ class ViralClipGenerator:
             print("🎵 Extracting audio for AI analysis...")
             audio = AudioFileClip(video_path)
             
+            # Check if we're in memory-efficient mode
+            import os
+            memory_efficient = os.getenv('MEMORY_EFFICIENT_MODE', 'false').lower() == 'true'
+            
             # Convert to numpy array for analysis with robust error handling
             try:
-                audio_array = audio.to_soundarray(fps=22050)
+                if memory_efficient:
+                    print("🧠 Memory-efficient mode: Using lower quality audio processing")
+                    # Use lower sample rate and shorter duration for memory efficiency
+                    audio_array = audio.to_soundarray(fps=16000)  # Lower sample rate
+                else:
+                    audio_array = audio.to_soundarray(fps=22050)
                 
                 # Handle different audio array formats
                 if len(audio_array.shape) > 1:
@@ -1195,15 +1222,53 @@ class ViralClipGenerator:
             
             # SUPER-ACCURATE Whisper transcription with advanced settings
             print("🤖 Running ULTRA-PRECISE Whisper transcription...")
-            result = self.whisper_model.transcribe(
-                video_path,
-                word_timestamps=True,
-                condition_on_previous_text=True,
-                temperature=0.0,  # Deterministic results
-                compression_ratio_threshold=2.4,
-                logprob_threshold=-1.0,
-                no_speech_threshold=0.6
-            )
+            
+            # Check memory before transcription
+            try:
+                import psutil
+                memory_before = psutil.Process().memory_info().rss / 1024 / 1024
+                print(f"🧠 Memory before Whisper transcription: {memory_before:.1f} MB")
+            except Exception as mem_error:
+                print(f"⚠️ Could not check memory: {mem_error}")
+            
+            # Adjust Whisper settings based on memory-efficient mode
+            import os
+            memory_efficient = os.getenv('MEMORY_EFFICIENT_MODE', 'false').lower() == 'true'
+            
+            if memory_efficient:
+                print("🧠 Memory-efficient mode: Using simplified Whisper settings")
+                result = self.whisper_model.transcribe(
+                    video_path,
+                    word_timestamps=False,  # Disable word timestamps to save memory
+                    condition_on_previous_text=False,  # Disable to save memory
+                    temperature=0.0,
+                    compression_ratio_threshold=2.4,
+                    logprob_threshold=-1.0,
+                    no_speech_threshold=0.6
+                )
+            else:
+                result = self.whisper_model.transcribe(
+                    video_path,
+                    word_timestamps=True,
+                    condition_on_previous_text=True,
+                    temperature=0.0,  # Deterministic results
+                    compression_ratio_threshold=2.4,
+                    logprob_threshold=-1.0,
+                    no_speech_threshold=0.6
+                )
+            
+            # Check memory after transcription
+            try:
+                import psutil
+                memory_after = psutil.Process().memory_info().rss / 1024 / 1024
+                print(f"🧠 Memory after Whisper transcription: {memory_after:.1f} MB")
+                print(f"🧠 Memory used by Whisper: {memory_after - memory_before:.1f} MB")
+            except Exception as mem_error:
+                print(f"⚠️ Could not check memory: {mem_error}")
+            
+            # Force garbage collection after transcription
+            import gc
+            gc.collect()
             
             # Create SUPER-ACCURATE segments using multiple analysis techniques
             segments = self._create_super_accurate_segments(
@@ -3710,6 +3775,14 @@ class ViralClipGenerator:
             
             print(f"Generating {len(viral_moments)} AI-selected viral clips...")
             
+            # Check memory before clip generation
+            try:
+                import psutil
+                memory_before_clips = psutil.Process().memory_info().rss / 1024 / 1024
+                print(f"🧠 Memory before clip generation: {memory_before_clips:.1f} MB")
+            except Exception as mem_error:
+                print(f"⚠️ Could not check memory: {mem_error}")
+            
             for i, moment in enumerate(viral_moments):
                 start_time = moment['start_time']
                 duration = moment['duration']
@@ -3790,9 +3863,26 @@ class ViralClipGenerator:
                     
                     print(f"   Clip created: {os.path.basename(clip_path)}")
                     
+                    # Check memory after each clip
+                    try:
+                        import psutil
+                        memory_after_clip = psutil.Process().memory_info().rss / 1024 / 1024
+                        print(f"   🧠 Memory after clip {i+1}: {memory_after_clip:.1f} MB")
+                        
+                        # Force garbage collection after each clip
+                        import gc
+                        gc.collect()
+                        
+                    except Exception as mem_error:
+                        print(f"   ⚠️ Could not check memory: {mem_error}")
+                    
                 except Exception as e:
                     error_msg = f"Failed to create clip {i+1}: {e}"
                     print(f"   ERROR: {error_msg}")
+                    
+                    # Force garbage collection on error
+                    import gc
+                    gc.collect()
             
             # Save comprehensive analysis report
             report_data = {
@@ -4925,9 +5015,9 @@ def frontend_upload_chunk():
                     # Set memory limits for processing
                     import resource
                     try:
-                        # Set memory limit to 1.5GB (1536 MB) - more conservative for Render
-                        resource.setrlimit(resource.RLIMIT_AS, (1536 * 1024 * 1024, -1))
-                        print(f"🧠 [Backend] Memory limit set to 1.5GB")
+                        # Set memory limit to 1GB (1024 MB) - very conservative for Render
+                        resource.setrlimit(resource.RLIMIT_AS, (1024 * 1024 * 1024, -1))
+                        print(f"🧠 [Backend] Memory limit set to 1GB")
                     except Exception as mem_error:
                         print(f"⚠️ [Backend] Could not set memory limit: {mem_error}")
                     
@@ -4935,14 +5025,24 @@ def frontend_upload_chunk():
                     import gc
                     gc.collect()
                     
-                    # Check available memory
+                    # Check available memory and adjust processing strategy
                     try:
                         available_memory = psutil.virtual_memory().available / 1024 / 1024
                         print(f"🧠 [Backend] Available memory: {available_memory:.1f} MB")
-                        if available_memory < 500:  # Less than 500MB available
-                            print("⚠️ [Backend] Low memory warning - using conservative processing")
+                        
+                        # Set environment variable for memory-efficient processing
+                        import os
+                        if available_memory < 800:  # Less than 800MB available
+                            print("⚠️ [Backend] Low memory detected - enabling memory-efficient mode")
+                            os.environ['MEMORY_EFFICIENT_MODE'] = 'true'
+                        else:
+                            os.environ['MEMORY_EFFICIENT_MODE'] = 'false'
+                            
                     except Exception as mem_check_error:
                         print(f"⚠️ [Backend] Could not check available memory: {mem_check_error}")
+                        # Default to memory-efficient mode if we can't check
+                        import os
+                        os.environ['MEMORY_EFFICIENT_MODE'] = 'true'
                     
                     processing_result = process_video_with_generator(
                         final_file_path,
