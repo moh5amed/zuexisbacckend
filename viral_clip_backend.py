@@ -1076,7 +1076,6 @@ class ViralClipGenerator:
             gc.collect()
             
             # Check if we're in ultra-conservative mode
-            import os
             ultra_conservative = os.getenv('ULTRA_CONSERVATIVE_MODE', 'false').lower() == 'true'
             
             if ultra_conservative:
@@ -1155,7 +1154,6 @@ class ViralClipGenerator:
             audio = AudioFileClip(video_path)
             
             # Check if we're in ultra-conservative mode
-            import os
             ultra_conservative = os.getenv('ULTRA_CONSERVATIVE_MODE', 'false').lower() == 'true'
             
             # Convert to numpy array for analysis with robust error handling
@@ -1232,7 +1230,6 @@ class ViralClipGenerator:
                 print(f"⚠️ Could not check memory: {mem_error}")
             
             # Adjust Whisper settings based on ultra-conservative mode
-            import os
             ultra_conservative = os.getenv('ULTRA_CONSERVATIVE_MODE', 'false').lower() == 'true'
             
             if ultra_conservative:
@@ -5031,7 +5028,6 @@ def frontend_upload_chunk():
                         print(f"🧠 [Backend] Available memory: {available_memory:.1f} MB")
                         
                         # Set environment variables for memory-efficient processing
-                        import os
                         if available_memory < 1000:  # Less than 1GB available
                             print("⚠️ [Backend] Low memory detected - enabling ultra-conservative mode")
                             os.environ['ULTRA_CONSERVATIVE_MODE'] = 'true'
@@ -5041,7 +5037,6 @@ def frontend_upload_chunk():
                     except Exception as mem_check_error:
                         print(f"⚠️ [Backend] Could not check available memory: {mem_check_error}")
                         # Default to ultra-conservative mode if we can't check
-                        import os
                         os.environ['ULTRA_CONSERVATIVE_MODE'] = 'true'
                     
                     processing_result = process_video_with_generator(
