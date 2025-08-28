@@ -1065,12 +1065,16 @@ class ViralClipGenerator:
             return full_transcript  # Fallback to full transcript
     
     def load_whisper_model(self):
-        """Load Whisper model with progress tracking"""
+        """Load Whisper model with progress tracking and memory management"""
         if self.whisper_model is not None:
             return
             
         print("Loading Whisper model (this may take a few minutes on first run)...")
         try:
+            # Force garbage collection before loading
+            import gc
+            gc.collect()
+            
             # Use a smaller model for faster loading and less memory usage
             self.whisper_model = whisper.load_model("tiny")
             print("Whisper model loaded successfully!")
@@ -1079,10 +1083,16 @@ class ViralClipGenerator:
             # If model loading fails, try to clear cache and retry once
             try:
                 import shutil
+                import gc
+                
+                # Force garbage collection
+                gc.collect()
+                
                 cache_dir = Path.home() / ".cache" / "whisper"
                 if cache_dir.exists():
                     print("Clearing corrupted Whisper cache...")
                     shutil.rmtree(cache_dir)
+                
                 print("Retrying Whisper model loading...")
                 self.whisper_model = whisper.load_model("tiny")
                 print("Whisper model loaded successfully after cache cleanup!")
@@ -1090,6 +1100,10 @@ class ViralClipGenerator:
                 print(f"Warning: Whisper model failed to load: {str(retry_e)}")
                 print("Continuing without transcription capabilities...")
                 self.whisper_model = None
+                
+                # Force garbage collection after failure
+                import gc
+                gc.collect()
     
     def extract_audio_segments(self, video_path: str):
         """SUPER-ACCURATE audio segment extraction using advanced AI and audio analysis"""
@@ -1100,7 +1114,7 @@ class ViralClipGenerator:
             # Check if Whisper model is available
             if self.whisper_model is None:
                 print("Warning: Whisper model not available, using fallback segmentation...")
-                return self._create_fallback_segments(video_path), "Transcription not available"
+                return self._create_enhanced_fallback_segments(video_path), "Transcription not available"
             
             # Get video duration and extract audio
             try:
@@ -1206,8 +1220,14 @@ class ViralClipGenerator:
         except Exception as e:
             error_msg = str(e)
             print(f"❌ SUPER-ACCURATE audio analysis failed: {error_msg}")
-            print("🔄 Falling back to enhanced segmentation...")
-            return self._create_enhanced_fallback_segments(video_path), "AI analysis failed - using enhanced fallback"
+            
+            # Check if it's a memory allocation error
+            if "Cannot allocate memory" in error_msg or "memory" in error_msg.lower():
+                print("🧠 Memory allocation error detected - using lightweight fallback...")
+                return self._create_lightweight_fallback_segments(video_path), "Memory error - using lightweight fallback"
+            else:
+                print("🔄 Falling back to enhanced segmentation...")
+                return self._create_enhanced_fallback_segments(video_path), "AI analysis failed - using enhanced fallback"
 
     def _create_super_accurate_segments(self, whisper_result, video_duration, audio_array, video_path):
         """Create ultra-precise segments using multiple AI analysis techniques"""
@@ -2124,7 +2144,8 @@ class ViralClipGenerator:
             
         except Exception as e:
             print(f"❌ Enhanced fallback failed: {e}")
-            return self._create_basic_fallback_segments(video_duration)
+            # Fallback to basic segments with default duration
+            return self._create_basic_fallback_segments(300)  # 5 minutes default
 
     def _create_enhanced_fallback_segments_from_duration(self, video_duration, whisper_result):
         """Create fallback segments from duration when other methods fail"""
@@ -2150,6 +2171,47 @@ class ViralClipGenerator:
                 'duration': end_time - start_time,
                 'viral_score': 5 + (i % 3),
                 'fallback_type': 'duration_based'
+            })
+        
+        return segments
+
+    def _create_lightweight_fallback_segments(self, video_path):
+        """Create lightweight fallback segments without heavy processing"""
+        try:
+            # Try to get video duration without loading the full video
+            import subprocess
+            result = subprocess.run([
+                'ffprobe', '-v', 'quiet', '-show_entries', 'format=duration',
+                '-of', 'csv=p=0', video_path
+            ], capture_output=True, text=True, timeout=10)
+            
+            if result.returncode == 0:
+                video_duration = float(result.stdout.strip())
+            else:
+                video_duration = 300  # Default 5 minutes
+                
+        except Exception as e:
+            print(f"⚠️ Could not get video duration: {e}")
+            video_duration = 300  # Default 5 minutes
+        
+        print(f"🪶 Lightweight fallback: Using duration {video_duration:.2f} seconds")
+        
+        # Create simple segments without heavy processing
+        segment_count = max(3, int(video_duration / 60))  # 1-minute segments
+        segment_duration = video_duration / segment_count
+        
+        segments = []
+        for i in range(segment_count):
+            start_time = i * segment_duration
+            end_time = (i + 1) * segment_duration if i < segment_count - 1 else video_duration
+            
+            segments.append({
+                'start': start_time,
+                'end': end_time,
+                'text': f"Lightweight segment {i+1}",
+                'duration': end_time - start_time,
+                'viral_score': 6,
+                'fallback_type': 'lightweight'
             })
         
         return segments
@@ -4863,11 +4925,24 @@ def frontend_upload_chunk():
                     # Set memory limits for processing
                     import resource
                     try:
-                        # Set memory limit to 2GB (2048 MB)
-                        resource.setrlimit(resource.RLIMIT_AS, (2 * 1024 * 1024 * 1024, -1))
-                        print(f"🧠 [Backend] Memory limit set to 2GB")
+                        # Set memory limit to 1.5GB (1536 MB) - more conservative for Render
+                        resource.setrlimit(resource.RLIMIT_AS, (1536 * 1024 * 1024, -1))
+                        print(f"🧠 [Backend] Memory limit set to 1.5GB")
                     except Exception as mem_error:
                         print(f"⚠️ [Backend] Could not set memory limit: {mem_error}")
+                    
+                    # Additional memory cleanup
+                    import gc
+                    gc.collect()
+                    
+                    # Check available memory
+                    try:
+                        available_memory = psutil.virtual_memory().available / 1024 / 1024
+                        print(f"🧠 [Backend] Available memory: {available_memory:.1f} MB")
+                        if available_memory < 500:  # Less than 500MB available
+                            print("⚠️ [Backend] Low memory warning - using conservative processing")
+                    except Exception as mem_check_error:
+                        print(f"⚠️ [Backend] Could not check available memory: {mem_check_error}")
                     
                     processing_result = process_video_with_generator(
                         final_file_path,
