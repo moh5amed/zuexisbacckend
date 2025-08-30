@@ -29,6 +29,7 @@ from werkzeug.utils import secure_filename
 # AI and ML libraries
 import google.generativeai as genai
 import whisper
+import openai
 try:
     from moviepy.editor import VideoFileClip, AudioFileClip
 except ImportError:
@@ -672,16 +673,21 @@ class ViralClipGenerator:
     """AI-Powered viral clip generator using MoviePy and smart transcription analysis"""
     
     def __init__(self, output_dir: str = "viral_clips"):
-        # Get API key from environment
-        self.api_key = os.getenv('VITE_GEMINI_API_KEY')
-        if not self.api_key:
+        # Get API keys from environment
+        self.gemini_api_key = os.getenv('VITE_GEMINI_API_KEY')
+        if not self.gemini_api_key:
             raise ValueError("VITE_GEMINI_API_KEY not found in .env.local file")
+        
+        self.openai_api_key = os.getenv('OPENAI_API_KEY')
+        if not self.openai_api_key:
+            raise ValueError("OPENAI_API_KEY not found in environment variables")
         
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True)
         
-        # Configure Gemini API with enhanced capabilities
-        genai.configure(api_key=self.api_key)
+        # Configure APIs
+        genai.configure(api_key=self.gemini_api_key)
+        openai.api_key = self.openai_api_key
         
         # Use Gemini 1.5 Flash for better quota management and efficiency
         self.model = genai.GenerativeModel('gemini-1.5-flash')
@@ -714,8 +720,8 @@ class ViralClipGenerator:
         self.min_segment_length = 3  # Minimum segment length in seconds
         self.max_segments = 50  # Maximum number of segments to analyze
         
-        # Whisper model will be loaded when needed
-        self.whisper_model = None
+        # Whisper API will be used instead of local model
+        self.use_whisper_api = True
         
         # Clip generation settings
         self.min_clip_duration = 15  # Minimum clip duration in seconds
@@ -725,7 +731,7 @@ class ViralClipGenerator:
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
         
-        self.logger.info(f"ViralClipGenerator initialized with API key: {self.api_key[:10]}...")
+        self.logger.info(f"ViralClipGenerator initialized with Gemini API key: {self.gemini_api_key[:10]}... and OpenAI API key: {self.openai_api_key[:10]}...")
         self.logger.info(f"Output directory: {self.output_dir}")
         
         # Initialize job queue
@@ -1064,75 +1070,306 @@ class ViralClipGenerator:
             print(f"Failed to preprocess transcription: {str(e)}")
             return full_transcript  # Fallback to full transcript
     
-    def load_whisper_model(self):
-        """Load Whisper model with progress tracking and memory management"""
-        if self.whisper_model is not None:
-            return
-            
-        print("Loading Whisper model (this may take a few minutes on first run)...")
+    def transcribe_with_whisper_api(self, audio_file_path: str) -> dict:
+        """Transcribe audio using OpenAI Whisper API with chunking support for large files"""
         try:
-            # Force garbage collection before loading
-            import gc
-            gc.collect()
+            print("🤖 Using OpenAI Whisper API for transcription...")
+            print(f"📁 Audio file: {audio_file_path}")
             
-            # Check if we're in ultra-conservative mode
-            import os
-            ultra_conservative = os.getenv('ULTRA_CONSERVATIVE_MODE', 'false').lower() == 'true'
+            # Check file size (Whisper API has 25MB limit)
+            file_size = os.path.getsize(audio_file_path)
+            file_size_mb = file_size / (1024 * 1024)
+            print(f"📊 File size: {file_size_mb:.2f} MB")
             
-            if ultra_conservative:
-                print("🧠 Ultra-conservative mode: Using minimal Whisper configuration")
-                # Set environment variables for memory-efficient processing
-                os.environ['WHISPER_CACHE_DIR'] = '/tmp/whisper_cache'
-                os.environ['CUDA_VISIBLE_DEVICES'] = ''  # Disable CUDA to save memory
+            # If file is too large, use chunking approach
+            if file_size > 23 * 1024 * 1024:  # 23MB limit for safety
+                print("⚠️ File too large for single Whisper API request (23MB limit)")
+                print("🔄 Using chunking approach for large file...")
+                return self._transcribe_large_audio_with_chunking(audio_file_path)
             
-            # Use a smaller model for faster loading and less memory usage
-            self.whisper_model = whisper.load_model("tiny")
-            print("Whisper model loaded successfully!")
+            # Single file transcription
+            return self._transcribe_single_audio_file(audio_file_path)
+                
+        except Exception as e:
+            print(f"❌ Whisper API transcription failed: {str(e)}")
+            raise e
+    
+    def _transcribe_single_audio_file(self, audio_file_path: str) -> dict:
+        """Transcribe a single audio file with Whisper API"""
+        try:
+            # Try compression first if file is close to limit
+            file_size = os.path.getsize(audio_file_path)
+            if file_size > 20 * 1024 * 1024:  # 20MB - try compression
+                print("🔄 Attempting to compress audio for better quality...")
+                compressed_path = self._compress_audio_for_whisper(audio_file_path)
+                if compressed_path:
+                    audio_file_path = compressed_path
+                    file_size = os.path.getsize(audio_file_path)
+                    file_size_mb = file_size / (1024 * 1024)
+                    print(f"✅ Audio compressed to: {file_size_mb:.2f} MB")
             
-            # Additional memory cleanup after loading
-            gc.collect()
+            # Open the audio file and send to Whisper API
+            with open(audio_file_path, 'rb') as audio_file:
+                print("🚀 Sending audio to Whisper API...")
+                
+                # Use Whisper API with enhanced settings
+                response = openai.Audio.transcribe(
+                    model="whisper-1",
+                    file=audio_file,
+                    response_format="verbose_json",  # Get detailed response with timestamps
+                    temperature=0.0,  # Deterministic results
+                    language="en"  # You can make this configurable
+                )
+                
+                print("✅ Whisper API transcription completed!")
+                print(f"📝 Transcription length: {len(response.text)} characters")
+                
+                # Convert API response to match local Whisper format
+                result = {
+                    'text': response.text,
+                    'segments': response.segments if hasattr(response, 'segments') else [],
+                    'words': []
+                }
+                
+                # Extract word-level timestamps if available
+                if hasattr(response, 'segments') and response.segments:
+                    for segment in response.segments:
+                        if hasattr(segment, 'words') and segment.words:
+                            for word in segment.words:
+                                result['words'].append({
+                                    'word': word.word,
+                                    'start': word.start,
+                                    'end': word.end,
+                                    'probability': getattr(word, 'probability', 1.0)
+                                })
+                
+                print(f"🎯 Extracted {len(result['words'])} word timestamps")
+                return result
+                
+        except Exception as e:
+            print(f"❌ Single file transcription failed: {str(e)}")
+            raise e
+    
+    def _transcribe_large_audio_with_chunking(self, audio_file_path: str) -> dict:
+        """Transcribe large audio file by chunking it into smaller pieces"""
+        try:
+            print("🔄 Starting chunked transcription for large audio file...")
+            
+            # Create audio chunks
+            audio_chunks = self._create_audio_chunks(audio_file_path)
+            print(f"✅ Created {len(audio_chunks)} audio chunks")
+            
+            # Transcribe each chunk
+            all_transcriptions = []
+            all_segments = []
+            all_words = []
+            chunk_offset = 0.0  # Track time offset for each chunk
+            
+            for i, chunk_path in enumerate(audio_chunks):
+                print(f"🔄 Processing chunk {i + 1}/{len(audio_chunks)}...")
+                
+                try:
+                    # Transcribe this chunk
+                    chunk_result = self._transcribe_single_audio_file(chunk_path)
+                    
+                    # Adjust timestamps for this chunk
+                    adjusted_segments = []
+                    adjusted_words = []
+                    
+                    # Adjust segment timestamps
+                    for segment in chunk_result.get('segments', []):
+                        adjusted_segment = segment.copy()
+                        adjusted_segment['start'] = segment['start'] + chunk_offset
+                        adjusted_segment['end'] = segment['end'] + chunk_offset
+                        adjusted_segments.append(adjusted_segment)
+                    
+                    # Adjust word timestamps
+                    for word in chunk_result.get('words', []):
+                        adjusted_word = word.copy()
+                        adjusted_word['start'] = word['start'] + chunk_offset
+                        adjusted_word['end'] = word['end'] + chunk_offset
+                        adjusted_words.append(adjusted_word)
+                    
+                    # Add to combined results
+                    all_transcriptions.append(chunk_result['text'])
+                    all_segments.extend(adjusted_segments)
+                    all_words.extend(adjusted_words)
+                    
+                    # Update offset for next chunk (estimate based on chunk duration)
+                    chunk_duration = self._get_audio_duration(chunk_path)
+                    chunk_offset += chunk_duration
+                    
+                    print(f"✅ Chunk {i + 1} transcribed successfully")
+                    
+                except Exception as chunk_error:
+                    print(f"❌ Chunk {i + 1} failed: {chunk_error}")
+                    # Continue with other chunks
+                    continue
+                
+                finally:
+                    # Clean up chunk file
+                    try:
+                        os.remove(chunk_path)
+                    except:
+                        pass
+            
+            # Combine all results
+            combined_text = ' '.join(all_transcriptions)
+            
+            result = {
+                'text': combined_text,
+                'segments': all_segments,
+                'words': all_words
+            }
+            
+            print(f"✅ Chunked transcription completed!")
+            print(f"📝 Combined transcription length: {len(combined_text)} characters")
+            print(f"🎯 Total segments: {len(all_segments)}")
+            print(f"🎯 Total words: {len(all_words)}")
+            
+            return result
             
         except Exception as e:
-            print(f"Failed to load Whisper model: {str(e)}")
-            # If model loading fails, try to clear cache and retry once
-            try:
-                import shutil
-                import gc
+            print(f"❌ Chunked transcription failed: {str(e)}")
+            raise e
+    
+    def _create_audio_chunks(self, audio_file_path: str) -> list:
+        """Create audio chunks from a large audio file"""
+        try:
+            import subprocess
+            
+            # Get audio duration
+            duration = self._get_audio_duration(audio_file_path)
+            print(f"📊 Audio duration: {duration:.2f} seconds")
+            
+            # Calculate chunk size (aim for 23MB chunks)
+            target_chunk_duration = 300  # 5 minutes per chunk (rough estimate for 23MB)
+            num_chunks = max(1, int(duration / target_chunk_duration))
+            actual_chunk_duration = duration / num_chunks
+            
+            print(f"🔄 Creating {num_chunks} chunks of ~{actual_chunk_duration:.1f} seconds each")
+            
+            chunk_paths = []
+            
+            for i in range(num_chunks):
+                start_time = i * actual_chunk_duration
+                end_time = min((i + 1) * actual_chunk_duration, duration)
                 
-                # Force garbage collection
-                gc.collect()
+                # Create chunk filename
+                chunk_path = os.path.join(
+                    tempfile.gettempdir(), 
+                    f"audio_chunk_{i}_{uuid.uuid4().hex}.wav"
+                )
                 
-                cache_dir = Path.home() / ".cache" / "whisper"
-                if cache_dir.exists():
-                    print("Clearing corrupted Whisper cache...")
-                    shutil.rmtree(cache_dir)
+                # Use ffmpeg to extract chunk
+                cmd = [
+                    'ffmpeg', '-i', audio_file_path,
+                    '-ss', str(start_time),
+                    '-t', str(end_time - start_time),
+                    '-ar', '16000',  # 16kHz sample rate
+                    '-ac', '1',      # Mono
+                    '-ab', '64k',    # 64k bitrate
+                    '-y',            # Overwrite
+                    chunk_path
+                ]
                 
-                print("Retrying Whisper model loading...")
-                self.whisper_model = whisper.load_model("tiny")
-                print("Whisper model loaded successfully after cache cleanup!")
+                print(f"🔄 Creating chunk {i + 1}/{num_chunks} ({start_time:.1f}s - {end_time:.1f}s)...")
                 
-                # Additional memory cleanup after retry
-                gc.collect()
+                result = subprocess.run(cmd, capture_output=True, text=True)
                 
-            except Exception as retry_e:
-                print(f"Warning: Whisper model failed to load: {str(retry_e)}")
-                print("Continuing without transcription capabilities...")
-                self.whisper_model = None
+                if result.returncode == 0:
+                    # Verify chunk size
+                    chunk_size = os.path.getsize(chunk_path)
+                    chunk_size_mb = chunk_size / (1024 * 1024)
+                    
+                    if chunk_size_mb <= 23:  # Within limit
+                        chunk_paths.append(chunk_path)
+                        print(f"✅ Chunk {i + 1} created: {chunk_size_mb:.2f} MB")
+                    else:
+                        print(f"⚠️ Chunk {i + 1} too large ({chunk_size_mb:.2f} MB), removing...")
+                        os.remove(chunk_path)
+                else:
+                    print(f"❌ Failed to create chunk {i + 1}: {result.stderr}")
+            
+            if not chunk_paths:
+                raise ValueError("Failed to create any valid audio chunks")
+            
+            print(f"✅ Successfully created {len(chunk_paths)} audio chunks")
+            return chunk_paths
+            
+        except Exception as e:
+            print(f"❌ Audio chunking failed: {str(e)}")
+            raise e
+    
+    def _get_audio_duration(self, audio_file_path: str) -> float:
+        """Get the duration of an audio file using ffprobe"""
+        try:
+            import subprocess
+            
+            cmd = [
+                'ffprobe', '-v', 'quiet',
+                '-show_entries', 'format=duration',
+                '-of', 'csv=p=0',
+                audio_file_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                duration = float(result.stdout.strip())
+                return duration
+            else:
+                print(f"⚠️ Could not get audio duration: {result.stderr}")
+                return 300.0  # Default 5 minutes
                 
-                # Force garbage collection after failure
-                import gc
-                gc.collect()
+        except Exception as e:
+            print(f"⚠️ Error getting audio duration: {e}")
+            return 300.0  # Default 5 minutes
+    
+    def _compress_audio_for_whisper(self, audio_file_path: str) -> Optional[str]:
+        """Compress audio file to fit within Whisper API limits"""
+        try:
+            import subprocess
+            
+            # Create compressed version
+            compressed_path = audio_file_path.replace('.wav', '_compressed.wav')
+            
+            # Use ffmpeg to compress audio (reduce sample rate and bitrate)
+            cmd = [
+                'ffmpeg', '-i', audio_file_path,
+                '-ar', '16000',  # Reduce sample rate to 16kHz
+                '-ac', '1',      # Mono channel
+                '-ab', '64k',    # Lower bitrate
+                '-y',            # Overwrite output file
+                compressed_path
+            ]
+            
+            print("🔄 Compressing audio with ffmpeg...")
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                # Check if compressed file is under 25MB
+                compressed_size = os.path.getsize(compressed_path)
+                if compressed_size < 25 * 1024 * 1024:
+                    print(f"✅ Audio compressed successfully: {compressed_size / (1024 * 1024):.2f} MB")
+                    return compressed_path
+                else:
+                    print("❌ Compressed audio still too large")
+                    os.remove(compressed_path)
+                    return None
+            else:
+                print(f"❌ Audio compression failed: {result.stderr}")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Audio compression error: {str(e)}")
+            return None
     
     def extract_audio_segments(self, video_path: str):
         """SUPER-ACCURATE audio segment extraction using advanced AI and audio analysis"""
         try:
-            # Load Whisper model if not already loaded
-            self.load_whisper_model()
-            
-            # Check if Whisper model is available
-            if self.whisper_model is None:
-                print("Warning: Whisper model not available, using fallback segmentation...")
-                return self._create_enhanced_fallback_segments(video_path), "Transcription not available"
+            # Use Whisper API instead of local model
+            print("🤖 Using Whisper API for transcription (no local model needed)")
             
             # Get video duration and extract audio
             try:
@@ -1220,51 +1457,34 @@ class ViralClipGenerator:
             
             audio.close()
             
-            # SUPER-ACCURATE Whisper transcription with advanced settings
-            print("🤖 Running ULTRA-PRECISE Whisper transcription...")
+            # Extract audio to temporary file for Whisper API
+            print("🎵 Extracting audio for Whisper API...")
+            temp_audio_path = os.path.join(tempfile.gettempdir(), f"temp_audio_{uuid.uuid4().hex}.wav")
             
-            # Check memory before transcription
             try:
-                import psutil
-                memory_before = psutil.Process().memory_info().rss / 1024 / 1024
-                print(f"🧠 Memory before Whisper transcription: {memory_before:.1f} MB")
-            except Exception as mem_error:
-                print(f"⚠️ Could not check memory: {mem_error}")
-            
-            # Adjust Whisper settings based on ultra-conservative mode
-            import os
-            ultra_conservative = os.getenv('ULTRA_CONSERVATIVE_MODE', 'false').lower() == 'true'
-            
-            if ultra_conservative:
-                print("🧠 Ultra-conservative mode: Using simplified Whisper settings")
-                result = self.whisper_model.transcribe(
-                    video_path,
-                    word_timestamps=False,  # Disable word timestamps to save memory
-                    condition_on_previous_text=False,  # Disable to save memory
-                    temperature=0.0,
-                    compression_ratio_threshold=2.4,
-                    logprob_threshold=-1.0,
-                    no_speech_threshold=0.6
-                )
-            else:
-                result = self.whisper_model.transcribe(
-                    video_path,
-                    word_timestamps=True,
-                    condition_on_previous_text=True,
-                    temperature=0.0,  # Deterministic results
-                    compression_ratio_threshold=2.4,
-                    logprob_threshold=-1.0,
-                    no_speech_threshold=0.6
-                )
-            
-            # Check memory after transcription
-            try:
-                import psutil
-                memory_after = psutil.Process().memory_info().rss / 1024 / 1024
-                print(f"🧠 Memory after Whisper transcription: {memory_after:.1f} MB")
-                print(f"🧠 Memory used by Whisper: {memory_after - memory_before:.1f} MB")
-            except Exception as mem_error:
-                print(f"⚠️ Could not check memory: {mem_error}")
+                # Write audio to temporary file
+                audio.write_audiofile(temp_audio_path, verbose=False, logger=None)
+                print(f"✅ Audio extracted to: {temp_audio_path}")
+                
+                # Use Whisper API for transcription
+                result = self.transcribe_with_whisper_api(temp_audio_path)
+                
+                # Clean up temporary file
+                try:
+                    os.remove(temp_audio_path)
+                    print("🧹 Temporary audio file cleaned up")
+                except Exception as cleanup_error:
+                    print(f"⚠️ Could not clean up temporary file: {cleanup_error}")
+                
+            except Exception as audio_error:
+                print(f"❌ Audio extraction failed: {audio_error}")
+                # Clean up temporary file if it exists
+                try:
+                    if os.path.exists(temp_audio_path):
+                        os.remove(temp_audio_path)
+                except:
+                    pass
+                raise audio_error
             
             # Force garbage collection after transcription
             import gc
@@ -6346,16 +6566,26 @@ def main():
         print("=" * 60)
         
         # Check environment variables - support both local and production
-        api_key = os.getenv('VITE_GEMINI_API_KEY') or os.getenv('GEMINI_API_KEY')
-        if not api_key:
+        gemini_api_key = os.getenv('VITE_GEMINI_API_KEY') or os.getenv('GEMINI_API_KEY')
+        openai_api_key = os.getenv('OPENAI_API_KEY')
+        
+        if not gemini_api_key:
             print("❌ GEMINI_API_KEY not found in environment variables")
             print("Please set GEMINI_API_KEY in your environment:")
             print("   Local: Create .env.local file with VITE_GEMINI_API_KEY=your_key")
             print("   Production: Set GEMINI_API_KEY in Render environment variables")
             return
         
+        if not openai_api_key:
+            print("❌ OPENAI_API_KEY not found in environment variables")
+            print("Please set OPENAI_API_KEY in your environment:")
+            print("   Local: Create .env.local file with OPENAI_API_KEY=your_key")
+            print("   Production: Set OPENAI_API_KEY in Render environment variables")
+            return
+        
         print(f"✅ Environment variables loaded successfully")
-        print(f"API Key: {api_key[:10]}...")
+        print(f"Gemini API Key: {gemini_api_key[:10]}...")
+        print(f"OpenAI API Key: {openai_api_key[:10]}...")
         
         # Initialize services
         if not initialize_services():
