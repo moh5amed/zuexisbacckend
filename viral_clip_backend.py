@@ -29,7 +29,12 @@ from werkzeug.utils import secure_filename
 # AI and ML libraries
 import google.generativeai as genai
 import whisper
-import openai
+try:
+    import openai
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+    print("Warning: openai not available. Whisper API functionality will be disabled.")
 try:
     from moviepy.editor import VideoFileClip, AudioFileClip
 except ImportError:
@@ -679,7 +684,7 @@ class ViralClipGenerator:
             raise ValueError("VITE_GEMINI_API_KEY not found in .env.local file")
         
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
-        if not self.openai_api_key:
+        if not self.openai_api_key and OPENAI_AVAILABLE:
             raise ValueError("OPENAI_API_KEY not found in environment variables")
         
         self.output_dir = Path(output_dir)
@@ -687,7 +692,8 @@ class ViralClipGenerator:
         
         # Configure APIs
         genai.configure(api_key=self.gemini_api_key)
-        openai.api_key = self.openai_api_key
+        if OPENAI_AVAILABLE and self.openai_api_key:
+            openai.api_key = self.openai_api_key
         
         # Use Gemini 1.5 Flash for better quota management and efficiency
         self.model = genai.GenerativeModel('gemini-1.5-flash')
@@ -1073,6 +1079,12 @@ class ViralClipGenerator:
     def transcribe_with_whisper_api(self, audio_file_path: str) -> dict:
         """Transcribe audio using OpenAI Whisper API with chunking support for large files"""
         try:
+            if not OPENAI_AVAILABLE:
+                raise ValueError("OpenAI package not available. Please install openai package.")
+            
+            if not self.openai_api_key:
+                raise ValueError("OpenAI API key not configured.")
+            
             print("🤖 Using OpenAI Whisper API for transcription...")
             print(f"📁 Audio file: {audio_file_path}")
             
@@ -1392,7 +1404,6 @@ class ViralClipGenerator:
             audio = AudioFileClip(video_path)
             
             # Check if we're in ultra-conservative mode
-            import os
             ultra_conservative = os.getenv('ULTRA_CONSERVATIVE_MODE', 'false').lower() == 'true'
             
             # Convert to numpy array for analysis with robust error handling
@@ -5251,7 +5262,6 @@ def frontend_upload_chunk():
                         print(f"🧠 [Backend] Available memory: {available_memory:.1f} MB")
                         
                         # Set environment variables for memory-efficient processing
-                        import os
                         if available_memory < 1000:  # Less than 1GB available
                             print("⚠️ [Backend] Low memory detected - enabling ultra-conservative mode")
                             os.environ['ULTRA_CONSERVATIVE_MODE'] = 'true'
@@ -5261,7 +5271,6 @@ def frontend_upload_chunk():
                     except Exception as mem_check_error:
                         print(f"⚠️ [Backend] Could not check available memory: {mem_check_error}")
                         # Default to ultra-conservative mode if we can't check
-                        import os
                         os.environ['ULTRA_CONSERVATIVE_MODE'] = 'true'
                     
                     processing_result = process_video_with_generator(
@@ -6576,16 +6585,22 @@ def main():
             print("   Production: Set GEMINI_API_KEY in Render environment variables")
             return
         
-        if not openai_api_key:
+        if not openai_api_key and OPENAI_AVAILABLE:
             print("❌ OPENAI_API_KEY not found in environment variables")
             print("Please set OPENAI_API_KEY in your environment:")
             print("   Local: Create .env.local file with OPENAI_API_KEY=your_key")
             print("   Production: Set OPENAI_API_KEY in Render environment variables")
             return
+        elif not OPENAI_AVAILABLE:
+            print("⚠️ OpenAI package not available - Whisper API functionality disabled")
+            print("   Install with: pip install openai")
         
         print(f"✅ Environment variables loaded successfully")
         print(f"Gemini API Key: {gemini_api_key[:10]}...")
-        print(f"OpenAI API Key: {openai_api_key[:10]}...")
+        if openai_api_key:
+            print(f"OpenAI API Key: {openai_api_key[:10]}...")
+        else:
+            print("OpenAI API Key: Not configured")
         
         # Initialize services
         if not initialize_services():
