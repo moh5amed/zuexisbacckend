@@ -5061,6 +5061,12 @@ def frontend_upload_chunk():
         file_name = request.form.get('fileName', 'unknown')
         project_id = request.form.get('projectId', 'unknown')
         
+        # Sanitize project_id to avoid directory path issues
+        import re
+        project_id = re.sub(r'[^\w\-_]', '_', project_id)
+        if not project_id or project_id == 'unknown':
+            project_id = f"project_{int(time.time())}"
+        
         print(f"📦 [Backend] Chunk {chunk_index + 1}/{total_chunks} for file: {file_name}")
         
         # Get the chunk data
@@ -5075,6 +5081,11 @@ def frontend_upload_chunk():
             project_dir = os.path.join(app.config['UPLOAD_FOLDER'], project_id)
             os.makedirs(project_dir, exist_ok=True)
             print(f"📁 [Backend] Created project directory: {project_dir}")
+            
+            # Force garbage collection at start of upload
+            import gc
+            gc.collect()
+            print(f"🧹 [Backend] Memory cleanup at upload start")
             
             # Create a session file to track upload progress
             session_file = os.path.join(project_dir, 'upload_session.json')
@@ -5091,11 +5102,16 @@ def frontend_upload_chunk():
             print(f"📝 [Backend] Created upload session: {session_file}")
         
         # Save chunk to persistent storage
-        chunk_path = os.path.join(app.config['UPLOAD_FOLDER'], project_id, f"chunk_{chunk_index:04d}.blob")
+        project_dir = os.path.join(app.config['UPLOAD_FOLDER'], project_id)
+        chunk_path = os.path.join(project_dir, f"chunk_{chunk_index:04d}.blob")
         chunk_file.save(chunk_path)
         
+        # Force garbage collection after each chunk to prevent memory buildup
+        import gc
+        gc.collect()
+        
         # Update session file to track this chunk
-        session_file = os.path.join(app.config['UPLOAD_FOLDER'], project_id, 'upload_session.json')
+        session_file = os.path.join(project_dir, 'upload_session.json')
         if os.path.exists(session_file):
             try:
                 with open(session_file, 'r') as f:
@@ -5151,7 +5167,7 @@ def frontend_upload_chunk():
                 return error_response, 400
             
             # Reconstruct the complete file
-            final_file_path = os.path.join(app.config['UPLOAD_FOLDER'], project_id, file_name)
+            final_file_path = os.path.join(project_dir, file_name)
             
             # All chunks exist, proceed with reconstruction
             try:
@@ -5177,7 +5193,7 @@ def frontend_upload_chunk():
             print(f"✅ [Backend] Final file size: {os.path.getsize(final_file_path)} bytes")
             
             # Clean up session file after successful reconstruction
-            session_file = os.path.join(app.config['UPLOAD_FOLDER'], project_id, 'upload_session.json')
+            session_file = os.path.join(project_dir, 'upload_session.json')
             if os.path.exists(session_file):
                 try:
                     os.remove(session_file)
@@ -5258,8 +5274,18 @@ def frontend_upload_chunk():
                         gc.collect()
                         
                         # Set environment variables for memory-efficient processing
-                        if available_memory < 2000:  # Less than 2GB available - be more conservative
-                            print("⚠️ [Backend] Low memory detected - enabling ultra-conservative mode")
+                        if available_memory < 1000:  # Less than 1GB available - be very conservative
+                            print("⚠️ [Backend] Very low memory detected - enabling ultra-conservative mode")
+                            os.environ['ULTRA_CONSERVATIVE_MODE'] = 'true'
+                            # Set memory limit to prevent crashes
+                            try:
+                                import resource
+                                resource.setrlimit(resource.RLIMIT_AS, (available_memory * 1024 * 1024 * 0.8, -1))
+                                print(f"🔒 [Backend] Set memory limit to {available_memory * 0.8:.0f}MB")
+                            except:
+                                pass
+                        elif available_memory < 2000:  # Less than 2GB available - be conservative
+                            print("⚠️ [Backend] Low memory detected - enabling conservative mode")
                             os.environ['ULTRA_CONSERVATIVE_MODE'] = 'true'
                         else:
                             os.environ['ULTRA_CONSERVATIVE_MODE'] = 'false'
