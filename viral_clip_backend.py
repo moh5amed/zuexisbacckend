@@ -5115,56 +5115,43 @@ def frontend_upload_chunk():
         if chunk_index == total_chunks - 1:
             print(f"🎬 [Backend] Last chunk received, reconstructing file...")
             
-            # Check session file to see what chunks we actually have
-            session_file = os.path.join(app.config['UPLOAD_FOLDER'], project_id, 'upload_session.json')
-            if os.path.exists(session_file):
-                try:
-                    with open(session_file, 'r') as f:
-                        session_data = json.load(f)
-                    uploaded_chunks = session_data.get('uploaded_chunks', [])
-                    print(f"📊 [Backend] Session shows {len(uploaded_chunks)} chunks uploaded")
-                    
-                    # Check if we have all chunks
-                    missing_chunks = []
-                    for i in range(total_chunks):
-                        if i not in uploaded_chunks:
-                            missing_chunks.append(i)
-                    
-                    if missing_chunks:
-                        print(f"❌ [Backend] Missing chunks based on session: {missing_chunks}")
-                        error_response = jsonify({
-                            'error': f'Missing chunks: {missing_chunks}',
-                            'message': f'Upload incomplete. Missing {len(missing_chunks)} chunks. Please try uploading again.',
-                            'chunkIndex': chunk_index,
-                            'totalChunks': total_chunks,
-                            'missingChunks': missing_chunks,
-                            'uploadedChunks': uploaded_chunks
-                        })
-                        return error_response, 400
-                        
-                except Exception as session_error:
-                    print(f"⚠️ [Backend] Warning: Could not read session file: {session_error}")
-            
-            # Reconstruct the complete file
-            final_file_path = os.path.join(app.config['UPLOAD_FOLDER'], project_id, file_name)
-            
-            # Double-check all chunks exist before starting reconstruction
+            # Check what chunk files actually exist on disk (more reliable than session file)
+            project_dir = os.path.join(app.config['UPLOAD_FOLDER'], project_id)
+            existing_chunks = []
             missing_chunks = []
+            
+            print(f"🔍 [Backend] Checking for existing chunk files in: {project_dir}")
+            
             for i in range(total_chunks):
-                chunk_path = os.path.join(app.config['UPLOAD_FOLDER'], project_id, f"chunk_{i:04d}.blob")
-                if not os.path.exists(chunk_path):
+                chunk_path = os.path.join(project_dir, f"chunk_{i:04d}.blob")
+                if os.path.exists(chunk_path):
+                    chunk_size = os.path.getsize(chunk_path)
+                    if chunk_size > 0:  # Make sure chunk is not empty
+                        existing_chunks.append(i)
+                        print(f"✅ [Backend] Found chunk {i}: {chunk_size} bytes")
+                    else:
+                        missing_chunks.append(i)
+                        print(f"❌ [Backend] Chunk {i} exists but is empty")
+                else:
                     missing_chunks.append(i)
+                    print(f"❌ [Backend] Chunk {i} not found")
+            
+            print(f"📊 [Backend] Found {len(existing_chunks)} valid chunks out of {total_chunks}")
             
             if missing_chunks:
                 print(f"❌ [Backend] Missing chunks: {missing_chunks}")
                 error_response = jsonify({
                     'error': f'Missing chunks: {missing_chunks}',
-                    'message': 'Some chunks were lost. Please try uploading again.',
+                    'message': f'Upload incomplete. Missing {len(missing_chunks)} chunks. Please try uploading again.',
                     'chunkIndex': chunk_index,
                     'totalChunks': total_chunks,
-                    'missingChunks': missing_chunks
+                    'missingChunks': missing_chunks,
+                    'existingChunks': existing_chunks
                 })
                 return error_response, 400
+            
+            # Reconstruct the complete file
+            final_file_path = os.path.join(app.config['UPLOAD_FOLDER'], project_id, file_name)
             
             # All chunks exist, proceed with reconstruction
             try:
@@ -5197,6 +5184,11 @@ def frontend_upload_chunk():
                     print(f"🧹 [Backend] Cleaned up upload session file")
                 except Exception as cleanup_error:
                     print(f"⚠️ [Backend] Warning: Could not clean up session file: {cleanup_error}")
+            
+            # Force garbage collection after chunk processing
+            import gc
+            gc.collect()
+            print(f"🧹 [Backend] Memory cleanup completed after chunk reconstruction")
             
             # Now process the complete video
             print(f"🎬 [Backend] Starting video processing for reconstructed file...")
@@ -5261,8 +5253,12 @@ def frontend_upload_chunk():
                         available_memory = psutil.virtual_memory().available / 1024 / 1024
                         print(f"🧠 [Backend] Available memory: {available_memory:.1f} MB")
                         
+                        # Force garbage collection before processing
+                        import gc
+                        gc.collect()
+                        
                         # Set environment variables for memory-efficient processing
-                        if available_memory < 1000:  # Less than 1GB available
+                        if available_memory < 2000:  # Less than 2GB available - be more conservative
                             print("⚠️ [Backend] Low memory detected - enabling ultra-conservative mode")
                             os.environ['ULTRA_CONSERVATIVE_MODE'] = 'true'
                         else:
