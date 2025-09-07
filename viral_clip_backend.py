@@ -4603,7 +4603,7 @@ def health_check():
             'client_id': bool(os.getenv('VITE_GOOGLE_DRIVE_CLIENT_ID')),
             'client_secret': bool(os.getenv('VITE_GOOGLE_DRIVE_CLIENT_SECRET')),
             'api_key': bool(os.getenv('VITE_GOOGLE_DRIVE_API_KEY')),
-            'redirect_uri': os.getenv('VITE_GOOGLE_DRIVE_REDIRECT_URI', 'http://localhost:3000/oauth-callback.html')
+            'redirect_uri': os.getenv('VITE_GOOGLE_DRIVE_REDIRECT_URI', 'https://www.zuexis.com/auth/callback')
         },
         'gemini': {
             'api_key': bool(os.getenv('VITE_GEMINI_API_KEY'))
@@ -6455,7 +6455,7 @@ def google_oauth_exchange():
         # Get Google OAuth credentials from environment
         client_id = os.getenv('VITE_GOOGLE_DRIVE_CLIENT_ID')
         client_secret = os.getenv('VITE_GOOGLE_DRIVE_CLIENT_SECRET')
-        redirect_uri = os.getenv('VITE_GOOGLE_DRIVE_REDIRECT_URI', 'http://localhost:5173/oauth-callback.html')
+        redirect_uri = os.getenv('VITE_GOOGLE_DRIVE_REDIRECT_URI', 'https://www.zuexis.com/auth/callback')
         
         if not client_id or not client_secret:
             app.logger.error("Google OAuth credentials not configured in environment variables")
